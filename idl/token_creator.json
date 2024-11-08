@@ -1,0 +1,80 @@
+{
+  "address": "BiJpcMpjq2RpGnEuCQwbC6PX5abeHWg2BsCn4y4LHjSC",
+  "metadata": {
+    "name": "token_creator",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "create_token",
+      "discriminator": [
+        84,
+        52,
+        204,
+        228,
+        24,
+        140,
+        234,
+        75
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "token_name",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "name": "_decimals",
+          "type": "u8"
+        },
+        {
+          "name": "supply",
+          "type": "u64"
+        },
+        {
+          "name": "_description",
+          "type": "string"
+        },
+        {
+          "name": "_uri_token",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient funds to pay the commission."
+    }
+  ]
+}
