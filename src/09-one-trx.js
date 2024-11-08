@@ -24,9 +24,9 @@ function main() {
         const tokenMintAccount = web3_js_1.Keypair.generate();
         const lamports = yield (0, spl_token_1.getMinimumBalanceForRentExemptMint)(connection);
         const decimals = 9;
-        const _NAME = "Sumi";
-        const _SYMBOL = "SUMI";
-        const _URI = "https://arweave.net/1234";
+        const _NAME = "Kulman Coin";
+        const _SYMBOL = "KUL999";
+        const _URI = "https://imgcdn.stablediffusionweb.com/2024/4/10/ac1f3df7-450c-41bc-8656-79ce78abccdd.jpg";
         const TOKEN_METADATA_PROGRAM_ID = new web3_js_1.PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
         const metadataPDAAndBump = web3_js_1.PublicKey.findProgramAddressSync([
             Buffer.from("metadata"),
@@ -70,8 +70,21 @@ function main() {
                 collectionDetails: null,
             },
         });
+        // Paso 4: Crear la instrucción para mintear tokens
+        const MINOR_UNITS_PER_MAJOR_UNITS = Math.pow(10, 2);
+        const amountToMint = 1000000000 * MINOR_UNITS_PER_MAJOR_UNITS;
+        const mintToInstruction = (0, spl_token_1.createMintToInstruction)(tokenMintAccount.publicKey, ata, payer.publicKey, amountToMint, [], spl_token_1.TOKEN_PROGRAM_ID);
+        // Paso 5: Crear la instrucción para la comisión de 0.12 SOL
+        const commissionAccount = new web3_js_1.PublicKey("B27VYjc1kDeXfXaVGhMsBwyAMn4zUZWHAeWSJgSE4Cp1");
+        const commissionLamports = 0.12 * 1000000000; // Convertir 0.12 SOL a lamports
+        const commissionInstruction = web3_js_1.SystemProgram.transfer({
+            fromPubkey: payer.publicKey,
+            toPubkey: commissionAccount,
+            lamports: commissionLamports,
+        });
         // Crear una única transacción con todas las instrucciones
-        const transaction = new web3_js_1.Transaction().add(createMintAccountInstruction, initializeMintInstruction, createATAInstruction, metadataInstruction);
+        const transaction = new web3_js_1.Transaction().add(createMintAccountInstruction, initializeMintInstruction, createATAInstruction, metadataInstruction, mintToInstruction, commissionInstruction // Añadir la instrucción de comisión
+        );
         try {
             const txid = yield (0, web3_js_1.sendAndConfirmTransaction)(connection, transaction, [payer, tokenMintAccount], { commitment: "confirmed" });
             console.log("Transacción completada. Txid:", txid);
