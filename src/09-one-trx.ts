@@ -1,5 +1,4 @@
-require("dotenv").config(); // Cargar variables de entorno
-
+require("dotenv").config();
 import { getKeypairFromEnvironment } from "@solana-developers/helpers";
 import {
   createInitializeMint2Instruction,
@@ -15,39 +14,25 @@ import {
   sendAndConfirmTransaction,
   SystemProgram,
   Transaction,
-  ConfirmOptions,
   TransactionInstruction,
 } from "@solana/web3.js";
-
-// Conexión a la red de Solana (Devnet)
-const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/mpl-token-metadata";
 
 async function sendTransactionToNetwork(
   transaction: Transaction,
   payer: Keypair, // Asegúrate de usar un Keypair
-  accountKeypair: Keypair
+  tokenMintAccount: Keypair,
+  connection: Connection
 ): Promise<string> {
-  // Establecer el feePayer y el bloque reciente para la transacción
-  transaction.feePayer = payer.publicKey;
-  const recentBlockhash = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = recentBlockhash.blockhash;
-
-  // Firmar la transacción con el Keypair del payer y accountKeypair
-  transaction.sign(payer, accountKeypair);
-
-  // Enviar la transacción a la red de Solana usando `sendAndConfirmTransaction`
   try {
     const txid = await sendAndConfirmTransaction(
       connection,
       transaction,
-      [payer, accountKeypair], // Los dos signers para la transacción
-      {
-        commitment: "confirmed", // Confirmación de la transacción
-      }
+      [payer, tokenMintAccount], // El Keypair que firma la transacción
+      { commitment: "confirmed" }
     );
-
     console.log("Transacción enviada y confirmada. Txid:", txid);
-    return txid; // Retornar el txid (string)
+    return txid;
   } catch (error) {
     console.error("Error al enviar la transacción:", error);
     throw new Error("Error al enviar la transacción");
@@ -56,13 +41,13 @@ async function sendTransactionToNetwork(
 
 function createAccountInstruction(
   payer: PublicKey,
-  accountKeypair: Keypair, // Aseguramos que 'accountKeypair' sea de tipo 'Keypair'
+  tokenMintAccount: Keypair, // Aseguramos que 'accountKeypair' sea de tipo 'Keypair'
   lamports: number,
   programId: PublicKey
 ): TransactionInstruction {
   return SystemProgram.createAccount({
     fromPubkey: payer,
-    newAccountPubkey: accountKeypair.publicKey,
+    newAccountPubkey: tokenMintAccount.publicKey,
     space: MINT_SIZE,
     lamports,
     programId,
@@ -71,43 +56,61 @@ function createAccountInstruction(
 
 async function createTokenTransaction(
   payer: Keypair, // 'payer' debe ser un Keypair
-  accountKeypair: Keypair,
+  tokenMintAccount: Keypair,
   lamports: number,
   decimals: number,
   programId: PublicKey,
-  confirmOptions?: ConfirmOptions
+  metadataData: any,
+  connection: Connection,
+  confirmOptions?: any
 ): Promise<string> {
   // Crear las instrucciones por separado
   const instructions = [
     createAccountInstruction(
       payer.publicKey,
-      accountKeypair,
+      tokenMintAccount,
       lamports,
       programId
     ),
     createInitializeMint2Instruction(
-      accountKeypair.publicKey,
+      tokenMintAccount.publicKey,
       decimals,
-      payer.publicKey, // Se usa la clave pública del 'payer'
+      payer.publicKey,
       programId
+    ),
+    // Crear la instrucción de metadata
+    createCreateMetadataAccountV3Instruction(
+      {
+        metadata: metadataData.metadataPDA,
+        mint: tokenMintAccount.publicKey,
+        mintAuthority: payer.publicKey,
+        payer: payer.publicKey,
+        updateAuthority: payer.publicKey,
+      },
+      {
+        createMetadataAccountArgsV3: {
+          collectionDetails: null,
+          data: metadataData.metadataData,
+          isMutable: true,
+        },
+      }
     ),
   ];
 
-  // Crear la transacción e incluir las instrucciones
   const transaction = new Transaction().add(...instructions);
 
-  // Enviar la transacción a la red y retornar el txid
   const sendTransactionResult = await sendTransactionToNetwork(
     transaction,
-    payer, // Pasamos el 'payer' para firmar la transacción
-    accountKeypair
+    payer,
+    tokenMintAccount,
+    connection
   );
-
-  return sendTransactionResult; // Retorna el txid como string
+  return sendTransactionResult;
 }
 
 async function main() {
-  // Cargar el par de claves del ambiente (asegúrate de que sea un Keypair)
+  const connection = new Connection(clusterApiUrl("devnet"));
+
   const payer = getKeypairFromEnvironment("SECRET_KEY") as Keypair; // Especificar que es un 'Keypair'
 
   // Verificar que el 'payer' tiene claves y está correctamente cargado
@@ -117,25 +120,56 @@ async function main() {
     );
   }
 
-  // Generar el par de claves para el mint (la cuenta que va a contener el mint)
-  const accountKeypair = Keypair.generate();
+  const tokenMintAccount = Keypair.generate();
 
   // Obtener la cantidad de lamports necesarios para crear la cuenta
   const lamports = await getMinimumBalanceForRentExemptMint(connection);
-
-  // Número de decimales para el token mint
   const decimals = 9;
-
-  // ProgramId de SPL Token
   const programId = TOKEN_PROGRAM_ID;
+
+  // Variables de metadata
+  const _NAME = "Sumi";
+  const _SYMBOL = "SUMI";
+  const _URI = "https://arweave.net/1234"; // Arweave/IPFS link
+
+  const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
+    "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+  );
+
+  // Datos de metadata
+  const metadataPDAAndBump = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("metadata"),
+      TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+      tokenMintAccount.publicKey.toBuffer(), // Usar el mint del token
+    ],
+    TOKEN_METADATA_PROGRAM_ID
+  );
+
+  const metadataPDA = metadataPDAAndBump[0];
+
+  const metadataData = {
+    metadataPDA, // Usamos la PDA correctamente calculada
+    metadataData: {
+      name: _NAME,
+      symbol: _SYMBOL,
+      uri: _URI,
+      sellerFeeBasisPoints: 0,
+      creators: null,
+      collection: null,
+      uses: null,
+    },
+  };
 
   try {
     const txid = await createTokenTransaction(
       payer,
-      accountKeypair,
+      tokenMintAccount,
       lamports,
       decimals,
-      programId
+      programId,
+      metadataData,
+      connection
     );
     console.log("Transacción completada. Txid:", txid);
   } catch (error) {
