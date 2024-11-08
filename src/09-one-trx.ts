@@ -5,6 +5,11 @@ import {
   getMinimumBalanceForRentExemptMint,
   MINT_SIZE,
   TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+  getOrCreateAssociatedTokenAccount,
 } from "@solana/spl-token";
 import {
   clusterApiUrl,
@@ -20,7 +25,7 @@ import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/m
 
 async function sendTransactionToNetwork(
   transaction: Transaction,
-  payer: Keypair, // Asegúrate de usar un Keypair
+  payer: Keypair,
   tokenMintAccount: Keypair,
   connection: Connection
 ): Promise<string> {
@@ -28,7 +33,7 @@ async function sendTransactionToNetwork(
     const txid = await sendAndConfirmTransaction(
       connection,
       transaction,
-      [payer, tokenMintAccount], // El Keypair que firma la transacción
+      [payer, tokenMintAccount],
       { commitment: "confirmed" }
     );
     console.log("Transacción enviada y confirmada. Txid:", txid);
@@ -41,7 +46,7 @@ async function sendTransactionToNetwork(
 
 function createAccountInstruction(
   payer: PublicKey,
-  tokenMintAccount: Keypair, // Aseguramos que 'accountKeypair' sea de tipo 'Keypair'
+  tokenMintAccount: Keypair,
   lamports: number,
   programId: PublicKey
 ): TransactionInstruction {
@@ -54,17 +59,55 @@ function createAccountInstruction(
   });
 }
 
+// Función para verificar o crear la cuenta asociada de token (ATA)
+async function getOrCreateAssociatedTokenAccount2(
+  connection: Connection,
+  payer: Keypair,
+  tokenMintAccount: PublicKey,
+  owner: PublicKey
+): Promise<PublicKey> {
+  const ata = await getAssociatedTokenAddressSync(
+    tokenMintAccount,
+    owner,
+    false,
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  console.log("ATA calculated:", ata.toBase58());
+
+  const accountInfo = await connection.getAccountInfo(ata);
+  if (accountInfo) {
+    console.log("La cuenta asociada de token ya existe:", ata.toBase58());
+    return ata;
+  }
+
+  const ataInstruction = createAssociatedTokenAccountInstruction(
+    payer.publicKey,
+    ata,
+    owner,
+    tokenMintAccount,
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+
+  const transaction = new Transaction().add(ataInstruction);
+  await sendAndConfirmTransaction(connection, transaction, [payer]);
+  console.log("Cuenta ATA creada:", ata.toBase58());
+
+  return ata;
+}
+
 async function createTokenTransaction(
-  payer: Keypair, // 'payer' debe ser un Keypair
+  payer: Keypair,
   tokenMintAccount: Keypair,
   lamports: number,
   decimals: number,
   programId: PublicKey,
   metadataData: any,
   connection: Connection,
+  recipient: PublicKey,
   confirmOptions?: any
 ): Promise<string> {
-  // Crear las instrucciones por separado
   const instructions = [
     createAccountInstruction(
       payer.publicKey,
@@ -78,7 +121,6 @@ async function createTokenTransaction(
       payer.publicKey,
       programId
     ),
-    // Crear la instrucción de metadata
     createCreateMetadataAccountV3Instruction(
       {
         metadata: metadataData.metadataPDA,
@@ -97,8 +139,14 @@ async function createTokenTransaction(
     ),
   ];
 
-  const transaction = new Transaction().add(...instructions);
+  const ata = await getOrCreateAssociatedTokenAccount(
+    connection,
+    payer,
+    tokenMintAccount.publicKey,
+    recipient
+  );
 
+  const transaction = new Transaction().add(...instructions);
   const sendTransactionResult = await sendTransactionToNetwork(
     transaction,
     payer,
@@ -110,10 +158,8 @@ async function createTokenTransaction(
 
 async function main() {
   const connection = new Connection(clusterApiUrl("devnet"));
+  const payer = getKeypairFromEnvironment("SECRET_KEY") as Keypair;
 
-  const payer = getKeypairFromEnvironment("SECRET_KEY") as Keypair; // Especificar que es un 'Keypair'
-
-  // Verificar que el 'payer' tiene claves y está correctamente cargado
   if (!payer || !payer.secretKey) {
     throw new Error(
       "La clave secreta del payer no está configurada correctamente"
@@ -121,27 +167,23 @@ async function main() {
   }
 
   const tokenMintAccount = Keypair.generate();
-
-  // Obtener la cantidad de lamports necesarios para crear la cuenta
   const lamports = await getMinimumBalanceForRentExemptMint(connection);
   const decimals = 9;
   const programId = TOKEN_PROGRAM_ID;
 
-  // Variables de metadata
   const _NAME = "Sumi";
   const _SYMBOL = "SUMI";
-  const _URI = "https://arweave.net/1234"; // Arweave/IPFS link
+  const _URI = "https://arweave.net/1234";
 
   const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
     "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
   );
 
-  // Datos de metadata
   const metadataPDAAndBump = PublicKey.findProgramAddressSync(
     [
       Buffer.from("metadata"),
       TOKEN_METADATA_PROGRAM_ID.toBuffer(),
-      tokenMintAccount.publicKey.toBuffer(), // Usar el mint del token
+      tokenMintAccount.publicKey.toBuffer(),
     ],
     TOKEN_METADATA_PROGRAM_ID
   );
@@ -149,7 +191,7 @@ async function main() {
   const metadataPDA = metadataPDAAndBump[0];
 
   const metadataData = {
-    metadataPDA, // Usamos la PDA correctamente calculada
+    metadataPDA,
     metadataData: {
       name: _NAME,
       symbol: _SYMBOL,
@@ -161,6 +203,8 @@ async function main() {
     },
   };
 
+  const recipient = payer.publicKey;
+
   try {
     const txid = await createTokenTransaction(
       payer,
@@ -169,7 +213,8 @@ async function main() {
       decimals,
       programId,
       metadataData,
-      connection
+      connection,
+      recipient
     );
     console.log("Transacción completada. Txid:", txid);
   } catch (error) {

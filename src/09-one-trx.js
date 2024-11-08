@@ -14,16 +14,10 @@ const helpers_1 = require("@solana-developers/helpers");
 const spl_token_1 = require("@solana/spl-token");
 const web3_js_1 = require("@solana/web3.js");
 const mpl_token_metadata_1 = require("@metaplex-foundation/mpl-token-metadata");
-// Variables de metadata
-const _NAME = "Sumi";
-const _SYMBOL = "SUMI";
-const _URI = "https://arweave.net/1234"; // Arweave/IPFS link
-function sendTransactionToNetwork(transaction, payer, // Asegúrate de usar un Keypair
-tokenMintAccount, connection) {
+function sendTransactionToNetwork(transaction, payer, tokenMintAccount, connection) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const txid = yield (0, web3_js_1.sendAndConfirmTransaction)(connection, transaction, [payer, tokenMintAccount], // El Keypair que firma la transacción
-            { commitment: "confirmed" });
+            const txid = yield (0, web3_js_1.sendAndConfirmTransaction)(connection, transaction, [payer, tokenMintAccount], { commitment: "confirmed" });
             console.log("Transacción enviada y confirmada. Txid:", txid);
             return txid;
         }
@@ -33,8 +27,7 @@ tokenMintAccount, connection) {
         }
     });
 }
-function createAccountInstruction(payer, tokenMintAccount, // Aseguramos que 'accountKeypair' sea de tipo 'Keypair'
-lamports, programId) {
+function createAccountInstruction(payer, tokenMintAccount, lamports, programId) {
     return web3_js_1.SystemProgram.createAccount({
         fromPubkey: payer,
         newAccountPubkey: tokenMintAccount.publicKey,
@@ -43,14 +36,28 @@ lamports, programId) {
         programId,
     });
 }
-function createTokenTransaction(payer, // 'payer' debe ser un Keypair
-tokenMintAccount, lamports, decimals, programId, metadataData, connection, confirmOptions) {
+// Función para verificar o crear la cuenta asociada de token (ATA)
+function getOrCreateAssociatedTokenAccount2(connection, payer, tokenMintAccount, owner) {
     return __awaiter(this, void 0, void 0, function* () {
-        // Crear las instrucciones por separado
+        const ata = yield (0, spl_token_1.getAssociatedTokenAddressSync)(tokenMintAccount, owner, false, spl_token_1.TOKEN_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID);
+        console.log("ATA calculated:", ata.toBase58());
+        const accountInfo = yield connection.getAccountInfo(ata);
+        if (accountInfo) {
+            console.log("La cuenta asociada de token ya existe:", ata.toBase58());
+            return ata;
+        }
+        const ataInstruction = (0, spl_token_1.createAssociatedTokenAccountInstruction)(payer.publicKey, ata, owner, tokenMintAccount, spl_token_1.TOKEN_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID);
+        const transaction = new web3_js_1.Transaction().add(ataInstruction);
+        yield (0, web3_js_1.sendAndConfirmTransaction)(connection, transaction, [payer]);
+        console.log("Cuenta ATA creada:", ata.toBase58());
+        return ata;
+    });
+}
+function createTokenTransaction(payer, tokenMintAccount, lamports, decimals, programId, metadataData, connection, recipient, confirmOptions) {
+    return __awaiter(this, void 0, void 0, function* () {
         const instructions = [
             createAccountInstruction(payer.publicKey, tokenMintAccount, lamports, programId),
             (0, spl_token_1.createInitializeMint2Instruction)(tokenMintAccount.publicKey, decimals, payer.publicKey, programId),
-            // Crear la instrucción de metadata
             (0, mpl_token_metadata_1.createCreateMetadataAccountV3Instruction)({
                 metadata: metadataData.metadataPDA,
                 mint: tokenMintAccount.publicKey,
@@ -65,6 +72,12 @@ tokenMintAccount, lamports, decimals, programId, metadataData, connection, confi
                 },
             }),
         ];
+        //   const ata = await getOrCreateAssociatedTokenAccount(
+        //     connection,
+        //     payer,
+        //     tokenMintAccount.publicKey,
+        //     recipient
+        //   );
         const transaction = new web3_js_1.Transaction().add(...instructions);
         const sendTransactionResult = yield sendTransactionToNetwork(transaction, payer, tokenMintAccount, connection);
         return sendTransactionResult;
@@ -73,26 +86,26 @@ tokenMintAccount, lamports, decimals, programId, metadataData, connection, confi
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
-        const payer = (0, helpers_1.getKeypairFromEnvironment)("SECRET_KEY"); // Especificar que es un 'Keypair'
-        // Verificar que el 'payer' tiene claves y está correctamente cargado
+        const payer = (0, helpers_1.getKeypairFromEnvironment)("SECRET_KEY");
         if (!payer || !payer.secretKey) {
             throw new Error("La clave secreta del payer no está configurada correctamente");
         }
         const tokenMintAccount = web3_js_1.Keypair.generate();
-        // Obtener la cantidad de lamports necesarios para crear la cuenta
         const lamports = yield (0, spl_token_1.getMinimumBalanceForRentExemptMint)(connection);
         const decimals = 9;
         const programId = spl_token_1.TOKEN_PROGRAM_ID;
+        const _NAME = "Sumi";
+        const _SYMBOL = "SUMI";
+        const _URI = "https://arweave.net/1234";
         const TOKEN_METADATA_PROGRAM_ID = new web3_js_1.PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
-        // Datos de metadata
         const metadataPDAAndBump = web3_js_1.PublicKey.findProgramAddressSync([
             Buffer.from("metadata"),
             TOKEN_METADATA_PROGRAM_ID.toBuffer(),
-            tokenMintAccount.publicKey.toBuffer(), // Usar el mint del token
+            tokenMintAccount.publicKey.toBuffer(),
         ], TOKEN_METADATA_PROGRAM_ID);
         const metadataPDA = metadataPDAAndBump[0];
         const metadataData = {
-            metadataPDA, // Usamos la PDA correctamente calculada
+            metadataPDA,
             metadataData: {
                 name: _NAME,
                 symbol: _SYMBOL,
@@ -103,8 +116,9 @@ function main() {
                 uses: null,
             },
         };
+        const recipient = payer.publicKey;
         try {
-            const txid = yield createTokenTransaction(payer, tokenMintAccount, lamports, decimals, programId, metadataData, connection);
+            const txid = yield createTokenTransaction(payer, tokenMintAccount, lamports, decimals, programId, metadataData, connection, recipient);
             console.log("Transacción completada. Txid:", txid);
         }
         catch (error) {
