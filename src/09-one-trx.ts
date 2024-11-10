@@ -19,7 +19,6 @@ import {
   Keypair,
   PublicKey,
   sendAndConfirmTransaction,
-  StakeInstruction,
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
@@ -27,14 +26,22 @@ import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/m
 import fs from "fs";
 import path from "path";
 
-// Configura el SDK de Pinata
+// Initialize Pinata SDK
 const pinata = new PinataSDK({
-  pinataJWTKey: process.env.PINATA_JWT!, // Usamos pinataJWTKey en lugar de pinataJwt
+  pinataJWTKey: process.env.PINATA_JWT!, // JWT key for Pinata authentication
 });
 
+/**
+ * Creates a metadata JSON file with details for the token and stores it locally.
+ * @param imageURI - URI of the token image on IPFS
+ * @param _name - Name of the token
+ * @param _symbol - Symbol of the token
+ * @param _description - Description of the token
+ * @returns The file path of the created JSON metadata file
+ */
 async function createMetadataJSON(
   imageURI: string,
-  _name: String,
+  _name: string,
   _symbol: string,
   _description: string
 ): Promise<string> {
@@ -50,71 +57,79 @@ async function createMetadataJSON(
 
   const metadataJson = JSON.stringify(metadata);
 
-  // Guardamos el archivo JSON en el sistema localmente
+  // Save the metadata JSON locally
   const jsonFilePath = path.resolve("metadata.json");
   fs.writeFileSync(jsonFilePath, metadataJson);
 
   return jsonFilePath;
 }
 
+/**
+ * Uploads a JSON file to Pinata and returns the IPFS URL.
+ * @param filePath - Path to the JSON file
+ * @returns Public URL to access the JSON file on IPFS
+ */
 async function uploadJsonToPinata(filePath: string): Promise<string> {
   try {
     const readableStream = fs.createReadStream(filePath);
 
     const options = {
       pinataMetadata: {
-        name: "metadata.json", // Nombre del archivo JSON
+        name: "metadata.json",
       },
     };
 
     const result = await pinata.pinFileToIPFS(readableStream, options);
-    console.log("JSON subido exitosamente. IPFS Hash:", result.IpfsHash);
+    console.log("JSON successfully uploaded. IPFS Hash:", result.IpfsHash);
 
-    // Retornamos la URL pública de Pinata
     return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
   } catch (error) {
-    console.error("Error al cargar el JSON en Pinata:", error);
+    console.error("Error uploading JSON to Pinata:", error);
     throw error;
   }
 }
 
-// Función para cargar un archivo a Pinata
+/**
+ * Uploads an image file to Pinata and returns the IPFS URL.
+ * @param filePath - Path to the image file
+ * @returns Public URL to access the image on IPFS
+ */
 async function uploadToPinata(filePath: string): Promise<string> {
   try {
     const readableStream = fs.createReadStream(filePath);
 
     const options = {
       pinataMetadata: {
-        name: "tokenlogo.png", // Asegúrate de incluir el nombre del archivo aquí
+        name: "tokenlogo.png",
       },
     };
 
     const result = await pinata.pinFileToIPFS(readableStream, options);
+    console.log("Image successfully uploaded. IPFS Hash:", result.IpfsHash);
 
-    console.log("Archivo subido exitosamente. IPFS Hash:", result.IpfsHash);
-    // return `ipfs://${result.IpfsHash}`; // Retorna el hash de IPFS del archivo como URI
-    // Usamos la URL HTTPS de Pinata para acceder al archivo
     return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
   } catch (error) {
-    console.error("Error al cargar en Pinata:", error);
+    console.error("Error uploading image to Pinata:", error);
     throw error;
   }
 }
 
+/**
+ * Main function to set up a token mint on Solana, upload metadata to Pinata, and complete a transaction.
+ */
 async function main() {
   const connection = new Connection(clusterApiUrl("devnet"));
   const payer = getKeypairFromEnvironment("SECRET_KEY") as Keypair;
 
   if (!payer || !payer.secretKey) {
-    throw new Error(
-      "La clave secreta del payer no está configurada correctamente"
-    );
+    throw new Error("Payer secret key is not configured properly");
   }
 
   const tokenMintAccount = Keypair.generate();
   const lamports = await getMinimumBalanceForRentExemptMint(connection);
   const decimals = 9;
 
+  // Token metadata
   const _NAME = "Kulman Coin";
   const _SYMBOL = "KUL999";
   const _DESCRIPTION = "The best coin.";
@@ -122,7 +137,8 @@ async function main() {
     "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
   );
 
-  const metadataPDAAndBump = PublicKey.findProgramAddressSync(
+  // Derive the Program Derived Address (PDA) for token metadata
+  const [metadataPDA] = PublicKey.findProgramAddressSync(
     [
       Buffer.from("metadata"),
       TOKEN_METADATA_PROGRAM_ID.toBuffer(),
@@ -131,23 +147,21 @@ async function main() {
     TOKEN_METADATA_PROGRAM_ID
   );
 
-  const metadataPDA = metadataPDAAndBump[0];
-
-  // Subir la imagen a Pinata y obtener la URI
-  const imageURI = await uploadToPinata(path.resolve("tokenlogo.png")); // Subimos la imagen
+  // Upload image and metadata JSON to Pinata
+  const imageURI = await uploadToPinata(path.resolve("tokenlogo.png"));
   const metadataJsonPath = await createMetadataJSON(
     imageURI,
     _NAME,
     _SYMBOL,
     _DESCRIPTION
-  ); // Creamos el archivo JSON con la URI de la imagen
-  const metadataURI = await uploadJsonToPinata(metadataJsonPath); // Subimos el archivo JSON a Pinata
+  );
+  const metadataURI = await uploadJsonToPinata(metadataJsonPath);
+  console.log("Metadata JSON URI:", metadataURI);
 
-  console.log("URI del archivo JSON de metadata:", metadataURI);
-
+  // Define recipient
   const recipient = payer.publicKey;
 
-  // Paso 1: Crear la cuenta para el token mint y su instrucción de inicialización
+  // Step 1: Initialize mint account and instruction
   const createMintAccountInstruction = SystemProgram.createAccount({
     fromPubkey: payer.publicKey,
     newAccountPubkey: tokenMintAccount.publicKey,
@@ -164,7 +178,7 @@ async function main() {
     TOKEN_PROGRAM_ID
   );
 
-  // Paso 2: Crear la cuenta asociada de token (ATA) para el destinatario
+  // Step 2: Create Associated Token Account (ATA)
   const ata = await getAssociatedTokenAddress(
     tokenMintAccount.publicKey,
     recipient,
@@ -182,11 +196,11 @@ async function main() {
     ASSOCIATED_TOKEN_PROGRAM_ID
   );
 
-  // Paso 3: Crear la instrucción para los metadatos del token
+  // Step 3: Create metadata instruction for the token
   const metadataData = {
     name: _NAME,
     symbol: _SYMBOL,
-    uri: metadataURI, // Usamos la URI de metadata obtenida de Pinata
+    uri: metadataURI,
     sellerFeeBasisPoints: 0,
     creators: null,
     collection: null,
@@ -210,9 +224,8 @@ async function main() {
     }
   );
 
-  // Paso 4: Crear la instrucción para mintear tokens
-  const MINOR_UNITS_PER_MAJOR_UNITS = Math.pow(10, 2);
-  const amountToMint = 1000000000 * MINOR_UNITS_PER_MAJOR_UNITS;
+  // Step 4: Mint tokens
+  const amountToMint = 1000000000 * Math.pow(10, 2); // Convert to minor units
   const mintToInstruction = createMintToInstruction(
     tokenMintAccount.publicKey,
     ata,
@@ -222,7 +235,7 @@ async function main() {
     TOKEN_PROGRAM_ID
   );
 
-  // Paso 5: Crear la instrucción para la comisión de 0.12 SOL
+  // Step 5: Transfer commission (0.12 SOL)
   const commissionAccount = new PublicKey(
     "B27VYjc1kDeXfXaVGhMsBwyAMn4zUZWHAeWSJgSE4Cp1"
   );
@@ -234,7 +247,7 @@ async function main() {
     lamports: commissionLamports,
   });
 
-  // Crear una única transacción con todas las instrucciones
+  // Combine all instructions into a single transaction
   const transaction = new Transaction().add(
     createMintAccountInstruction,
     initializeMintInstruction,
@@ -253,10 +266,11 @@ async function main() {
         commitment: "confirmed",
       }
     );
-    console.log("Transacción completada. Txid:", txid);
+    console.log("Transaction completed. Txid:", txid);
   } catch (error) {
-    console.error("Error al enviar la transacción:", error);
+    console.error("Transaction failed:", error);
   }
 }
 
+// Execute the main function
 main().catch(console.log);
