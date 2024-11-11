@@ -45,10 +45,30 @@ io.on("connection", (socket) => {
   // Paso 1: Cliente solicita la creación del token
   socket.on("create_token", async (data) => {
     try {
-      const { name, symbol, description, imageURI, publicKey } = data;
+      const {
+        name,
+        symbol,
+        description,
+        imageURI,
+        decimals,
+        supply,
+        publicKey,
+        revokeFreeze,
+        revokeMint,
+      } = data;
 
       // Validamos los parámetros recibidos
-      if (!name || !symbol || !description || !imageURI || !publicKey) {
+      if (
+        !name ||
+        !symbol ||
+        !description ||
+        !imageURI ||
+        !decimals ||
+        !supply ||
+        !publicKey ||
+        !revokeFreeze ||
+        !revokeMint
+      ) {
         throw new Error("Faltan parámetros necesarios.");
       }
 
@@ -60,7 +80,11 @@ io.on("connection", (socket) => {
           symbol,
           description,
           imageURI,
-          publicKey
+          decimals,
+          supply,
+          publicKey,
+          revokeFreeze,
+          revokeMint
         );
 
       // Paso 3: Enviar detalles de la transacción al cliente
@@ -111,7 +135,11 @@ async function prepareTokenTransaction(
   symbol: string,
   description: string,
   imageURI: string,
-  publicKey: string
+  decimals: number,
+  supply: BigInt,
+  payerPublicKey: string,
+  revokeFreeze: boolean,
+  revokeMint: boolean
 ) {
   try {
     const connection = new Connection(clusterApiUrl("devnet"));
@@ -120,16 +148,16 @@ async function prepareTokenTransaction(
     const lamports = await connection.getMinimumBalanceForRentExemption(
       MINT_SIZE
     );
-    const decimals = 9;
 
     // Obtener el recentBlockhash y el lastValidBlockHeight
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash();
 
-    const publicKeyObject = new PublicKey(publicKey);
+    // El address del payer
+    const payerPublicKeyObject = new PublicKey(payerPublicKey);
 
     // Instrucción para crear la cuenta de token mint
     const createTokenAccountInstruction = SystemProgram.createAccount({
-      fromPubkey: publicKeyObject,
+      fromPubkey: payerPublicKeyObject,
       newAccountPubkey: tokenMintAccount.publicKey,
       lamports,
       space: MINT_SIZE,
@@ -139,10 +167,12 @@ async function prepareTokenTransaction(
     const initMintInstruction = createInitializeMint2Instruction(
       tokenMintAccount.publicKey,
       decimals,
-      publicKeyObject, // Usar la clave pública del cliente como mint authority
-      publicKeyObject // Usar la clave pública del cliente como freeze authority
+      payerPublicKeyObject, // Usar la clave pública del cliente como mint authority
+      payerPublicKeyObject // Usar la clave pública del cliente como freeze authority
     );
+    // el mint Authority al principio debe permitir mintear los tokens
 
+    // Armo la transaccion
     const transaction = new Transaction().add(
       createTokenAccountInstruction,
       initMintInstruction
@@ -151,7 +181,7 @@ async function prepareTokenTransaction(
     // Asignar el recentBlockhash a la transacción
     transaction.recentBlockhash = blockhash;
     transaction.lastValidBlockHeight = lastValidBlockHeight;
-    transaction.feePayer = publicKeyObject; // Establecer el feePayer correctamente
+    transaction.feePayer = payerPublicKeyObject; // Establecer el feePayer correctamente
     console.log("Fee payer: ", transaction.feePayer);
     console.log("# signs: ", transaction.signatures.length);
     console.log("Blockhash Server out", blockhash);

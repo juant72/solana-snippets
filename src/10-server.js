@@ -61,14 +61,22 @@ io.on("connection", (socket) => {
     // Paso 1: Cliente solicita la creación del token
     socket.on("create_token", (data) => __awaiter(void 0, void 0, void 0, function* () {
         try {
-            const { name, symbol, description, imageURI, publicKey } = data;
+            const { name, symbol, description, imageURI, decimals, supply, publicKey, revokeFreeze, revokeMint, } = data;
             // Validamos los parámetros recibidos
-            if (!name || !symbol || !description || !imageURI || !publicKey) {
+            if (!name ||
+                !symbol ||
+                !description ||
+                !imageURI ||
+                !decimals ||
+                !supply ||
+                !publicKey ||
+                !revokeFreeze ||
+                !revokeMint) {
                 throw new Error("Faltan parámetros necesarios.");
             }
             console.log("Calculamos los costos y generamos la transacción");
             // Calculamos los costos y generamos la transacción
-            const { transactionDetails, estimatedGas } = yield prepareTokenTransaction(name, symbol, description, imageURI, publicKey);
+            const { transactionDetails, estimatedGas } = yield prepareTokenTransaction(name, symbol, description, imageURI, decimals, supply, publicKey, revokeFreeze, revokeMint);
             // Paso 3: Enviar detalles de la transacción al cliente
             socket.emit("transaction_details", {
                 transaction: transactionDetails,
@@ -108,33 +116,35 @@ function getRecentBlockhash() {
     });
 }
 // Función para preparar la transacción de creación de token
-function prepareTokenTransaction(name, symbol, description, imageURI, publicKey) {
+function prepareTokenTransaction(name, symbol, description, imageURI, decimals, supply, payerPublicKey, revokeFreeze, revokeMint) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
             tokenMintAccount = web3_js_1.Keypair.generate();
             console.log("Token MINT account:", tokenMintAccount.publicKey.toBase58());
             const lamports = yield connection.getMinimumBalanceForRentExemption(spl_token_1.MINT_SIZE);
-            const decimals = 9;
             // Obtener el recentBlockhash y el lastValidBlockHeight
             const { blockhash, lastValidBlockHeight } = yield getRecentBlockhash();
-            const publicKeyObject = new web3_js_1.PublicKey(publicKey);
+            // El address del payer
+            const payerPublicKeyObject = new web3_js_1.PublicKey(payerPublicKey);
             // Instrucción para crear la cuenta de token mint
             const createTokenAccountInstruction = web3_js_1.SystemProgram.createAccount({
-                fromPubkey: publicKeyObject,
+                fromPubkey: payerPublicKeyObject,
                 newAccountPubkey: tokenMintAccount.publicKey,
                 lamports,
                 space: spl_token_1.MINT_SIZE,
                 programId: spl_token_1.TOKEN_PROGRAM_ID,
             });
-            const initMintInstruction = (0, spl_token_1.createInitializeMint2Instruction)(tokenMintAccount.publicKey, decimals, publicKeyObject, // Usar la clave pública del cliente como mint authority
-            publicKeyObject // Usar la clave pública del cliente como freeze authority
+            const initMintInstruction = (0, spl_token_1.createInitializeMint2Instruction)(tokenMintAccount.publicKey, decimals, payerPublicKeyObject, // Usar la clave pública del cliente como mint authority
+            payerPublicKeyObject // Usar la clave pública del cliente como freeze authority
             );
+            // el mint Authority al principio debe permitir mintear los tokens
+            // Armo la transaccion
             const transaction = new web3_js_1.Transaction().add(createTokenAccountInstruction, initMintInstruction);
             // Asignar el recentBlockhash a la transacción
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
-            transaction.feePayer = publicKeyObject; // Establecer el feePayer correctamente
+            transaction.feePayer = payerPublicKeyObject; // Establecer el feePayer correctamente
             console.log("Fee payer: ", transaction.feePayer);
             console.log("# signs: ", transaction.signatures.length);
             console.log("Blockhash Server out", blockhash);

@@ -12,6 +12,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@faker-js/faker": "^9.2.0",
     "@metaplex-foundation/mpl-token-metadata": "^2.13.0",
     "@pinata/sdk": "^2.1.0",
     "@project-serum/anchor": "^0.26.0",
