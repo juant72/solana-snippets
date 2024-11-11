@@ -4,7 +4,11 @@ dotenv.config();
 
 import PinataSDK from "@pinata/sdk";
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
   createInitializeMint2Instruction,
+  createMintToInstruction,
+  getAssociatedTokenAddress,
   MINT_SIZE,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -22,6 +26,7 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import { Readable } from "stream";
+import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/mpl-token-metadata";
 
 //////////// END IMPORTS ////////////////
 
@@ -183,10 +188,10 @@ async function prepareTokenTransaction(
       description
     );
 
-    const metadataIpfsURI = await uploadJsonToPinata(
+    const metadataJsonIpfsURI = await uploadJsonToPinata(
       stringToReadableStream(metadataJsonString)
     );
-    console.log("Metadata IPFS JSon URI:", metadataIpfsURI);
+    console.log("Metadata IPFS JSon URI:", metadataJsonIpfsURI);
 
     // Obtener el recentBlockhash y el lastValidBlockHeight
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash();
@@ -211,10 +216,88 @@ async function prepareTokenTransaction(
     );
     // el mint Authority al principio debe permitir mintear los tokens
 
+    // Step 2: Create Associated Token Account (ATA)
+    console.log("Creating Asociated Token Account instruction....");
+    const ata = await getAssociatedTokenAddress(
+      tokenMintAccount.publicKey,
+      payerPublicKeyObject,
+      false,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const createATAInstruction = createAssociatedTokenAccountInstruction(
+      payerPublicKeyObject,
+      ata,
+      payerPublicKeyObject,
+      tokenMintAccount.publicKey,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    // Step 3: Create metadata instruction for the token
+    console.log("Creating Metadata instruction....");
+    const metadataData = {
+      name: name,
+      symbol: symbol,
+      uri: metadataJsonIpfsURI,
+      sellerFeeBasisPoints: 0,
+      creators: null,
+      collection: null,
+      uses: null,
+    };
+
+    const metadataInstruction = createCreateMetadataAccountV3Instruction(
+      {
+        metadata: metadataPDA,
+        mint: tokenMintAccount.publicKey,
+        mintAuthority: payerPublicKeyObject,
+        payer: payerPublicKeyObject,
+        updateAuthority: payerPublicKeyObject,
+      },
+      {
+        createMetadataAccountArgsV3: {
+          data: metadataData,
+          isMutable: true,
+          collectionDetails: null,
+        },
+      }
+    );
+
+    // Step 4: Mint tokens
+    console.log("Minting tokens instruction....");
+    const amountToMint = 1000000000 * Math.pow(10, 2); // Convert to minor units
+    const mintToInstruction = createMintToInstruction(
+      tokenMintAccount.publicKey,
+      ata,
+      payerPublicKeyObject,
+      amountToMint,
+      [],
+      TOKEN_PROGRAM_ID
+    );
+
+    // Step 5: Transfer commission (0.12 SOL)
+    console.log("Creating Transfer Comission instruction....");
+    const fees_account = process.env.FEES_ACCOUNT! as String;
+    console.log("Fees Account:", fees_account);
+    const commissionAccount = new PublicKey(fees_account);
+
+    const commissionLamports = 0.12 * 1_000_000_000;
+
+    const commissionInstruction = SystemProgram.transfer({
+      fromPubkey: payerPublicKeyObject,
+      toPubkey: commissionAccount,
+      lamports: commissionLamports,
+    });
+
     // Armo la transaccion
     const transaction = new Transaction().add(
       createTokenAccountInstruction,
-      initMintInstruction
+      initMintInstruction,
+      createATAInstruction,
+      metadataInstruction,
+      mintToInstruction,
+      commissionInstruction
     );
 
     // Asignar el recentBlockhash a la transacción

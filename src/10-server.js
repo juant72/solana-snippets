@@ -44,6 +44,7 @@ const socket_io_1 = require("socket.io");
 const http_1 = __importDefault(require("http"));
 const fs_1 = __importDefault(require("fs"));
 const stream_1 = require("stream");
+const mpl_token_metadata_1 = require("@metaplex-foundation/mpl-token-metadata");
 //////////// END IMPORTS ////////////////
 let tokenMintAccount;
 const port = process.env.PORT || 3000;
@@ -140,8 +141,8 @@ function prepareTokenTransaction(name, symbol, description, imageData, decimals,
             // const imageURI = await uploadToPinata(path.resolve("tokenlogo.png"));
             const imageIpfsURI = yield uploadReadableStreamToPinata(imageStream);
             const metadataJsonString = yield createMetadataJSON(imageIpfsURI, name, symbol, description);
-            const metadataIpfsURI = yield uploadJsonToPinata(stringToReadableStream(metadataJsonString));
-            console.log("Metadata IPFS JSon URI:", metadataIpfsURI);
+            const metadataJsonIpfsURI = yield uploadJsonToPinata(stringToReadableStream(metadataJsonString));
+            console.log("Metadata IPFS JSon URI:", metadataJsonIpfsURI);
             // Obtener el recentBlockhash y el lastValidBlockHeight
             const { blockhash, lastValidBlockHeight } = yield getRecentBlockhash();
             // El address del payer
@@ -158,8 +159,51 @@ function prepareTokenTransaction(name, symbol, description, imageData, decimals,
             payerPublicKeyObject // Usar la clave pública del cliente como freeze authority
             );
             // el mint Authority al principio debe permitir mintear los tokens
+            // Step 2: Create Associated Token Account (ATA)
+            console.log("Creating Asociated Token Account instruction....");
+            const ata = yield (0, spl_token_1.getAssociatedTokenAddress)(tokenMintAccount.publicKey, payerPublicKeyObject, false, spl_token_1.TOKEN_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID);
+            const createATAInstruction = (0, spl_token_1.createAssociatedTokenAccountInstruction)(payerPublicKeyObject, ata, payerPublicKeyObject, tokenMintAccount.publicKey, spl_token_1.TOKEN_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID);
+            // Step 3: Create metadata instruction for the token
+            console.log("Creating Metadata instruction....");
+            const metadataData = {
+                name: name,
+                symbol: symbol,
+                uri: metadataJsonIpfsURI,
+                sellerFeeBasisPoints: 0,
+                creators: null,
+                collection: null,
+                uses: null,
+            };
+            const metadataInstruction = (0, mpl_token_metadata_1.createCreateMetadataAccountV3Instruction)({
+                metadata: metadataPDA,
+                mint: tokenMintAccount.publicKey,
+                mintAuthority: payerPublicKeyObject,
+                payer: payerPublicKeyObject,
+                updateAuthority: payerPublicKeyObject,
+            }, {
+                createMetadataAccountArgsV3: {
+                    data: metadataData,
+                    isMutable: true,
+                    collectionDetails: null,
+                },
+            });
+            // Step 4: Mint tokens
+            console.log("Minting tokens instruction....");
+            const amountToMint = 1000000000 * Math.pow(10, 2); // Convert to minor units
+            const mintToInstruction = (0, spl_token_1.createMintToInstruction)(tokenMintAccount.publicKey, ata, payerPublicKeyObject, amountToMint, [], spl_token_1.TOKEN_PROGRAM_ID);
+            // Step 5: Transfer commission (0.12 SOL)
+            console.log("Creating Transfer Comission instruction....");
+            const fees_account = process.env.FEES_ACCOUNT;
+            console.log("Fees Account:", fees_account);
+            const commissionAccount = new web3_js_1.PublicKey(fees_account);
+            const commissionLamports = 0.12 * 1000000000;
+            const commissionInstruction = web3_js_1.SystemProgram.transfer({
+                fromPubkey: payerPublicKeyObject,
+                toPubkey: commissionAccount,
+                lamports: commissionLamports,
+            });
             // Armo la transaccion
-            const transaction = new web3_js_1.Transaction().add(createTokenAccountInstruction, initMintInstruction);
+            const transaction = new web3_js_1.Transaction().add(createTokenAccountInstruction, initMintInstruction, createATAInstruction, metadataInstruction, mintToInstruction, commissionInstruction);
             // Asignar el recentBlockhash a la transacción
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
