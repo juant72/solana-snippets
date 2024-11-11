@@ -42,6 +42,7 @@ const spl_token_1 = require("@solana/spl-token");
 const web3_js_1 = require("@solana/web3.js");
 const socket_io_1 = require("socket.io");
 const http_1 = __importDefault(require("http"));
+let tokenMintAccount;
 const port = process.env.PORT || 3000;
 const pinata = new sdk_1.default({ pinataJWTKey: process.env.PINATA_JWT });
 // Crear un servidor HTTP para usar con Socket.IO
@@ -82,6 +83,7 @@ io.on("connection", (socket) => {
     // Paso 4: Cliente firma la transacción
     socket.on("signed_transaction", (signedTransaction) => __awaiter(void 0, void 0, void 0, function* () {
         try {
+            console.log("Iniciando proceso de envio de TRX a Blockchain");
             const { signedTransactionData } = signedTransaction;
             // Validar y ejecutar la transacción en la blockchain
             const result = yield executeTransaction(signedTransactionData);
@@ -98,7 +100,7 @@ io.on("connection", (socket) => {
 function getRecentBlockhash() {
     return __awaiter(this, void 0, void 0, function* () {
         const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
-        const { blockhash, lastValidBlockHeight } = yield connection.getLatestBlockhash("confirmed");
+        const { blockhash, lastValidBlockHeight } = yield connection.getLatestBlockhash("finalized");
         if (!blockhash) {
             throw new Error("No se pudo obtener el recentBlockhash.");
         }
@@ -110,7 +112,7 @@ function prepareTokenTransaction(name, symbol, description, imageURI, publicKey)
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
-            const tokenMintAccount = web3_js_1.Keypair.generate();
+            tokenMintAccount = web3_js_1.Keypair.generate();
             console.log("Token MINT account:", tokenMintAccount.publicKey.toBase58());
             const lamports = yield connection.getMinimumBalanceForRentExemption(spl_token_1.MINT_SIZE);
             const decimals = 9;
@@ -135,11 +137,13 @@ function prepareTokenTransaction(name, symbol, description, imageURI, publicKey)
             transaction.feePayer = publicKeyObject; // Establecer el feePayer correctamente
             console.log("Fee payer: ", transaction.feePayer);
             console.log("# signs: ", transaction.signatures.length);
+            console.log("Blockhash Server out", blockhash);
             // Añadir la cuenta de mint a la transacción para ser firmada por el cliente
-            transaction.sign(tokenMintAccount); // Agregar la firma de la cuenta de mint
+            // transaction.sign(tokenMintAccount); // Agregar la firma de la cuenta de mint
             // Calculamos el gas estimado
             const estimatedGas = yield connection.getFeeForMessage(transaction.compileMessage());
             console.log("TRX to send: ", transaction);
+            transaction.compileMessage();
             const serializedTransaction = transaction.serialize({
                 requireAllSignatures: false,
                 verifySignatures: true,
@@ -157,18 +161,57 @@ function prepareTokenTransaction(name, symbol, description, imageURI, publicKey)
         }
     });
 }
-// Función para ejecutar la transacción en la blockchain
 function executeTransaction(signedTransactionData) {
     return __awaiter(this, void 0, void 0, function* () {
+        const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
         try {
-            const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
-            const signedTransaction = web3_js_1.Transaction.from(Buffer.from(signedTransactionData, "base64"));
-            console.log("Signed transaction: ", signedTransaction);
-            const txid = yield (0, web3_js_1.sendAndConfirmTransaction)(connection, signedTransaction, [] // Aquí se podría añadir el array de firmas necesarias si corresponde
-            );
+            // Decodificar y crear la transacción desde el dato firmado recibido
+            let signedTransaction = web3_js_1.Transaction.from(Buffer.from(signedTransactionData, "base64"));
+            // Obtener el recentBlockhash más actualizado
+            const { blockhash: recentBlockhash } = yield connection.getLatestBlockhash();
+            const latestBlockHash = yield connection.getLatestBlockhash();
+            const { blockhash, lastValidBlockHeight } = yield getRecentBlockhash();
+            // Asignar el recentBlockhash a la transacción si no coincide
+            if (signedTransaction.recentBlockhash !== blockhash) {
+                console.log("Actualizando el recentBlockhash en la transacción.");
+                console.log("latest - blockhash: ", blockhash);
+                // signedTransaction.recentBlockhash = blockhash;
+            }
+            //COnsol
+            console.log("Signing TRX with  MintAccount  ###", tokenMintAccount.publicKey.toBase58());
+            console.log("******************************");
+            console.log("Antes de la firma=\n", signedTransaction);
+            console.log("******++*****************");
+            signedTransaction.partialSign(tokenMintAccount);
+            console.log("=======================");
+            console.log("After Mint Account SIGNING TRX =============", signedTransaction);
+            console.log("=======================");
+            // Validar que la transacción tenga firmas válidas antes de enviarla
+            if (!signedTransaction.verifySignatures()) {
+                throw new Error("Signature verification failed: las firmas no son válidas o están incompletas.");
+            }
+            // Enviar la transacción ya firmada
+            const txid = yield connection.sendRawTransaction(signedTransaction.serialize());
+            // Confirmación opcional si quieres asegurarte de que esté incluida en un bloque
+            // await connection.confirmTransaction(txid, "confirmed");
+            yield connection.confirmTransaction({
+                blockhash: blockhash,
+                lastValidBlockHeight: lastValidBlockHeight,
+                signature: txid,
+            });
+            console.log("Transacción exitosa, txid:", txid);
             return { success: true, transactionId: txid };
         }
         catch (error) {
+            if (error instanceof Error &&
+                error.message.includes("blockhash not found")) {
+                // Si el blockhash es inválido, pedimos al cliente que firme nuevamente
+                console.error("Blockhash vencido. Solicita una firma nueva al cliente.");
+                return {
+                    success: false,
+                    error: "Blockhash vencido. Solicita una firma nueva.",
+                };
+            }
             console.error("Error al ejecutar la transacción:", error);
             throw error;
         }

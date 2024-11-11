@@ -1,3 +1,4 @@
+import { connection } from "./../../aktyvo/app/utils/connection";
 import * as dotenv from "dotenv";
 dotenv.config();
 
@@ -18,6 +19,8 @@ import {
 } from "@solana/web3.js";
 import { Server } from "socket.io";
 import http from "http";
+
+let tokenMintAccount: Keypair;
 
 const port = process.env.PORT || 3000;
 const pinata = new PinataSDK({ pinataJWTKey: process.env.PINATA_JWT! });
@@ -74,6 +77,7 @@ io.on("connection", (socket) => {
   // Paso 4: Cliente firma la transacción
   socket.on("signed_transaction", async (signedTransaction) => {
     try {
+      console.log("Iniciando proceso de envio de TRX a Blockchain");
       const { signedTransactionData } = signedTransaction;
 
       // Validar y ejecutar la transacción en la blockchain
@@ -92,7 +96,7 @@ io.on("connection", (socket) => {
 async function getRecentBlockhash() {
   const connection = new Connection(clusterApiUrl("devnet"));
   const { blockhash, lastValidBlockHeight } =
-    await connection.getLatestBlockhash("confirmed");
+    await connection.getLatestBlockhash("finalized");
 
   if (!blockhash) {
     throw new Error("No se pudo obtener el recentBlockhash.");
@@ -111,7 +115,7 @@ async function prepareTokenTransaction(
 ) {
   try {
     const connection = new Connection(clusterApiUrl("devnet"));
-    const tokenMintAccount = Keypair.generate();
+    tokenMintAccount = Keypair.generate();
     console.log("Token MINT account:", tokenMintAccount.publicKey.toBase58());
     const lamports = await connection.getMinimumBalanceForRentExemption(
       MINT_SIZE
@@ -150,9 +154,10 @@ async function prepareTokenTransaction(
     transaction.feePayer = publicKeyObject; // Establecer el feePayer correctamente
     console.log("Fee payer: ", transaction.feePayer);
     console.log("# signs: ", transaction.signatures.length);
+    console.log("Blockhash Server out", blockhash);
 
     // Añadir la cuenta de mint a la transacción para ser firmada por el cliente
-    transaction.sign(tokenMintAccount); // Agregar la firma de la cuenta de mint
+    // transaction.sign(tokenMintAccount); // Agregar la firma de la cuenta de mint
 
     // Calculamos el gas estimado
     const estimatedGas = await connection.getFeeForMessage(
@@ -160,7 +165,7 @@ async function prepareTokenTransaction(
     );
 
     console.log("TRX to send: ", transaction);
-
+    transaction.compileMessage();
     const serializedTransaction = transaction.serialize({
       requireAllSignatures: false,
       verifySignatures: true,
@@ -179,23 +184,82 @@ async function prepareTokenTransaction(
   }
 }
 
-// Función para ejecutar la transacción en la blockchain
 async function executeTransaction(signedTransactionData: string) {
+  const connection = new Connection(clusterApiUrl("devnet"));
+
   try {
-    const connection = new Connection(clusterApiUrl("devnet"));
-    const signedTransaction = Transaction.from(
+    // Decodificar y crear la transacción desde el dato firmado recibido
+    let signedTransaction = Transaction.from(
       Buffer.from(signedTransactionData, "base64")
     );
 
-    console.log("Signed transaction: ", signedTransaction);
+    // Obtener el recentBlockhash más actualizado
+    const { blockhash: recentBlockhash } =
+      await connection.getLatestBlockhash();
 
-    const txid = await sendAndConfirmTransaction(
-      connection,
-      signedTransaction,
-      [] // Aquí se podría añadir el array de firmas necesarias si corresponde
+    const latestBlockHash = await connection.getLatestBlockhash();
+
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash();
+
+    // Asignar el recentBlockhash a la transacción si no coincide
+    if (signedTransaction.recentBlockhash !== blockhash) {
+      console.log("Actualizando el recentBlockhash en la transacción.");
+      console.log("latest - blockhash: ", blockhash);
+      // signedTransaction.recentBlockhash = blockhash;
+    }
+    //COnsol
+    console.log(
+      "Signing TRX with  MintAccount  ###",
+      tokenMintAccount.publicKey.toBase58()
     );
+
+    console.log("******************************");
+    console.log("Antes de la firma=\n", signedTransaction);
+    console.log("******++*****************");
+
+    signedTransaction.partialSign(tokenMintAccount);
+    console.log("=======================");
+    console.log(
+      "After Mint Account SIGNING TRX =============",
+      signedTransaction
+    );
+    console.log("=======================");
+
+    // Validar que la transacción tenga firmas válidas antes de enviarla
+    if (!signedTransaction.verifySignatures()) {
+      throw new Error(
+        "Signature verification failed: las firmas no son válidas o están incompletas."
+      );
+    }
+
+    // Enviar la transacción ya firmada
+    const txid = await connection.sendRawTransaction(
+      signedTransaction.serialize()
+    );
+
+    // Confirmación opcional si quieres asegurarte de que esté incluida en un bloque
+    // await connection.confirmTransaction(txid, "confirmed");
+    await connection.confirmTransaction({
+      blockhash: blockhash,
+      lastValidBlockHeight: lastValidBlockHeight,
+      signature: txid,
+    });
+
+    console.log("Transacción exitosa, txid:", txid);
     return { success: true, transactionId: txid };
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("blockhash not found")
+    ) {
+      // Si el blockhash es inválido, pedimos al cliente que firme nuevamente
+      console.error("Blockhash vencido. Solicita una firma nueva al cliente.");
+      return {
+        success: false,
+        error: "Blockhash vencido. Solicita una firma nueva.",
+      };
+    }
+
     console.error("Error al ejecutar la transacción:", error);
     throw error;
   }

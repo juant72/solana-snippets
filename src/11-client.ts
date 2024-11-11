@@ -1,6 +1,12 @@
 import { io } from "socket.io-client";
 import readlineSync from "readline-sync";
-import { Transaction, Keypair, VersionedTransaction } from "@solana/web3.js";
+import {
+  Transaction,
+  Keypair,
+  VersionedTransaction,
+  Connection,
+  clusterApiUrl,
+} from "@solana/web3.js";
 import fs from "fs";
 
 const socket = io("http://localhost:3000"); // Asegúrate de que el puerto sea correcto
@@ -78,6 +84,16 @@ socket.on("transaction_details", async (data: any) => {
   );
   if (acceptTransaction) {
     console.log("Signing trx start!:");
+
+    const connection = new Connection(clusterApiUrl("devnet"));
+
+    // Obtener el `recentBlockhash`
+    // const { blockhash } = await connection.getLatestBlockhash();
+    // Obtener el recentBlockhash y el lastValidBlockHeight
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash();
+    console.log("****************");
+    console.log("*** Recibido recentBlockhash: ", blockhash);
+
     try {
       let transaction: Transaction | VersionedTransaction;
       console.log("Settin let!:");
@@ -86,6 +102,8 @@ socket.on("transaction_details", async (data: any) => {
           "transaction = Transaction.from(Buffer.from(data.transaction))"
         );
         transaction = Transaction.from(Buffer.from(data.transaction, "base64"));
+        transaction.recentBlockhash = blockhash;
+        transaction.compileMessage();
       } catch (error) {
         transaction = VersionedTransaction.deserialize(
           Buffer.from(data.transaction, "base64")
@@ -93,8 +111,10 @@ socket.on("transaction_details", async (data: any) => {
       }
 
       if (transaction instanceof VersionedTransaction) {
+        console.log("Versioned TRX");
         transaction.sign([keypair]);
       } else {
+        console.log("Normal TRX");
         transaction.partialSign(keypair);
       }
       //   const txnSignature = await connection.sendRawTransaction(
@@ -114,11 +134,14 @@ socket.on("transaction_details", async (data: any) => {
       console.log("Transacción firmada");
 
       // Enviar la transacción firmada al servidor
+      console.log("Enviando TRX signed to the server  >>>>>>");
       socket.emit("signed_transaction", {
-        signedTransactionData: transaction.serialize().toString("base64"),
+        signedTransactionData: transaction
+          .serialize({ requireAllSignatures: false })
+          .toString("base64"),
       });
     } catch (err) {
-      console.error("Error al firmar la transacción:", err);
+      console.error("Error al firmar la transacción en el cliente:", err);
     }
   } else {
     console.log("Transacción cancelada.");
@@ -139,6 +162,19 @@ socket.on("error", (error: { message: string; error: string }) => {
   console.error(error.message);
   console.error("Detalles del error:", error.error);
 });
+
+// Función para obtener el recentBlockhash
+async function getRecentBlockhash() {
+  const connection = new Connection(clusterApiUrl("devnet"));
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("finalized");
+
+  if (!blockhash) {
+    throw new Error("No se pudo obtener el recentBlockhash.");
+  }
+
+  return { blockhash, lastValidBlockHeight };
+}
 
 async function start() {
   showMenu();

@@ -71,20 +71,31 @@ socket.on("transaction_details", (data) => __awaiter(void 0, void 0, void 0, fun
     const acceptTransaction = readline_sync_1.default.keyInYNStrict("¿Deseas firmar esta transacción y proceder?");
     if (acceptTransaction) {
         console.log("Signing trx start!:");
+        const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
+        // Obtener el `recentBlockhash`
+        // const { blockhash } = await connection.getLatestBlockhash();
+        // Obtener el recentBlockhash y el lastValidBlockHeight
+        const { blockhash, lastValidBlockHeight } = yield getRecentBlockhash();
+        console.log("****************");
+        console.log("*** Recibido recentBlockhash: ", blockhash);
         try {
             let transaction;
             console.log("Settin let!:");
             try {
                 console.log("transaction = Transaction.from(Buffer.from(data.transaction))");
                 transaction = web3_js_1.Transaction.from(Buffer.from(data.transaction, "base64"));
+                transaction.recentBlockhash = blockhash;
+                transaction.compileMessage();
             }
             catch (error) {
                 transaction = web3_js_1.VersionedTransaction.deserialize(Buffer.from(data.transaction, "base64"));
             }
             if (transaction instanceof web3_js_1.VersionedTransaction) {
+                console.log("Versioned TRX");
                 transaction.sign([keypair]);
             }
             else {
+                console.log("Normal TRX");
                 transaction.partialSign(keypair);
             }
             //   const txnSignature = await connection.sendRawTransaction(
@@ -99,12 +110,15 @@ socket.on("transaction_details", (data) => __awaiter(void 0, void 0, void 0, fun
             //   transaction.sign(keypair);
             console.log("Transacción firmada");
             // Enviar la transacción firmada al servidor
+            console.log("Enviando TRX signed to the server  >>>>>>");
             socket.emit("signed_transaction", {
-                signedTransactionData: transaction.serialize().toString("base64"),
+                signedTransactionData: transaction
+                    .serialize({ requireAllSignatures: false })
+                    .toString("base64"),
             });
         }
         catch (err) {
-            console.error("Error al firmar la transacción:", err);
+            console.error("Error al firmar la transacción en el cliente:", err);
         }
     }
     else {
@@ -125,6 +139,17 @@ socket.on("error", (error) => {
     console.error(error.message);
     console.error("Detalles del error:", error.error);
 });
+// Función para obtener el recentBlockhash
+function getRecentBlockhash() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
+        const { blockhash, lastValidBlockHeight } = yield connection.getLatestBlockhash("finalized");
+        if (!blockhash) {
+            throw new Error("No se pudo obtener el recentBlockhash.");
+        }
+        return { blockhash, lastValidBlockHeight };
+    });
+}
 function start() {
     return __awaiter(this, void 0, void 0, function* () {
         showMenu();
