@@ -42,6 +42,9 @@ const spl_token_1 = require("@solana/spl-token");
 const web3_js_1 = require("@solana/web3.js");
 const socket_io_1 = require("socket.io");
 const http_1 = __importDefault(require("http"));
+const fs_1 = __importDefault(require("fs"));
+const stream_1 = require("stream");
+//////////// END IMPORTS ////////////////
 let tokenMintAccount;
 const port = process.env.PORT || 3000;
 const pinata = new sdk_1.default({ pinataJWTKey: process.env.PINATA_JWT });
@@ -61,12 +64,12 @@ io.on("connection", (socket) => {
     // Paso 1: Cliente solicita la creación del token
     socket.on("create_token", (data) => __awaiter(void 0, void 0, void 0, function* () {
         try {
-            const { name, symbol, description, imageURI, decimals, supply, publicKey, revokeFreeze, revokeMint, } = data;
+            const { name, symbol, description, imageData, decimals, supply, publicKey, revokeFreeze, revokeMint, } = data;
             // Validamos los parámetros recibidos
             if (!name ||
                 !symbol ||
                 !description ||
-                !imageURI ||
+                !imageData ||
                 !decimals ||
                 !supply ||
                 !publicKey ||
@@ -76,7 +79,7 @@ io.on("connection", (socket) => {
             }
             console.log("Calculamos los costos y generamos la transacción");
             // Calculamos los costos y generamos la transacción
-            const { transactionDetails, estimatedGas } = yield prepareTokenTransaction(name, symbol, description, imageURI, decimals, supply, publicKey, revokeFreeze, revokeMint);
+            const { transactionDetails, estimatedGas } = yield prepareTokenTransaction(name, symbol, description, imageData, decimals, supply, publicKey, revokeFreeze, revokeMint);
             // Paso 3: Enviar detalles de la transacción al cliente
             socket.emit("transaction_details", {
                 transaction: transactionDetails,
@@ -116,13 +119,29 @@ function getRecentBlockhash() {
     });
 }
 // Función para preparar la transacción de creación de token
-function prepareTokenTransaction(name, symbol, description, imageURI, decimals, supply, payerPublicKey, revokeFreeze, revokeMint) {
+function prepareTokenTransaction(name, symbol, description, imageData, decimals, supply, payerPublicKey, revokeFreeze, revokeMint) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
             tokenMintAccount = web3_js_1.Keypair.generate();
             console.log("Token MINT account:", tokenMintAccount.publicKey.toBase58());
             const lamports = yield connection.getMinimumBalanceForRentExemption(spl_token_1.MINT_SIZE);
+            // Preparing Metadata Stuff
+            // Derive the Program Derived Address (PDA) for token metadata
+            const TOKEN_METADATA_PROGRAM_ID = new web3_js_1.PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+            const [metadataPDA] = web3_js_1.PublicKey.findProgramAddressSync([
+                Buffer.from("metadata"),
+                TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+                tokenMintAccount.publicKey.toBuffer(),
+            ], TOKEN_METADATA_PROGRAM_ID);
+            // Manipuling image token
+            // Upload image and metadata JSON to Pinata
+            const imageStream = base64ToReadableStream(imageData);
+            // const imageURI = await uploadToPinata(path.resolve("tokenlogo.png"));
+            const imageIpfsURI = yield uploadReadableStreamToPinata(imageStream);
+            const metadataJsonString = yield createMetadataJSON(imageIpfsURI, name, symbol, description);
+            const metadataIpfsURI = yield uploadJsonToPinata(stringToReadableStream(metadataJsonString));
+            console.log("Metadata IPFS JSon URI:", metadataIpfsURI);
             // Obtener el recentBlockhash y el lastValidBlockHeight
             const { blockhash, lastValidBlockHeight } = yield getRecentBlockhash();
             // El address del payer
@@ -152,7 +171,7 @@ function prepareTokenTransaction(name, symbol, description, imageURI, decimals, 
             // transaction.sign(tokenMintAccount); // Agregar la firma de la cuenta de mint
             // Calculamos el gas estimado
             const estimatedGas = yield connection.getFeeForMessage(transaction.compileMessage());
-            console.log("TRX to send: ", transaction);
+            // console.log("TRX to send: ", transaction);
             transaction.compileMessage();
             const serializedTransaction = transaction.serialize({
                 requireAllSignatures: false,
@@ -189,13 +208,16 @@ function executeTransaction(signedTransactionData) {
             }
             //COnsol
             console.log("Signing TRX with  MintAccount  ###", tokenMintAccount.publicKey.toBase58());
-            console.log("******************************");
-            console.log("Antes de la firma=\n", signedTransaction);
-            console.log("******++*****************");
+            // console.log("******************************");
+            // console.log("Antes de la firma=\n", signedTransaction);
+            // console.log("******++*****************");
             signedTransaction.partialSign(tokenMintAccount);
-            console.log("=======================");
-            console.log("After Mint Account SIGNING TRX =============", signedTransaction);
-            console.log("=======================");
+            // console.log("=======================");
+            // console.log(
+            //   "After Mint Account SIGNING TRX =============",
+            //   signedTransaction
+            // );
+            // console.log("=======================");
             // Validar que la transacción tenga firmas válidas antes de enviarla
             if (!signedTransaction.verifySignatures()) {
                 throw new Error("Signature verification failed: las firmas no son válidas o están incompletas.");
@@ -225,6 +247,113 @@ function executeTransaction(signedTransactionData) {
             console.error("Error al ejecutar la transacción:", error);
             throw error;
         }
+    });
+}
+function uploadToPinata(filePath) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const readableStream = fs_1.default.createReadStream(filePath);
+            const options = {
+                pinataMetadata: {
+                    name: "tokenlogo.png",
+                },
+            };
+            const result = yield pinata.pinFileToIPFS(readableStream, options);
+            console.log("Image successfully uploaded. IPFS Hash:", result.IpfsHash);
+            return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+        }
+        catch (error) {
+            console.error("Error uploading image to Pinata:", error);
+            throw error;
+        }
+    });
+}
+function base64ToReadableStream(base64Image) {
+    // Paso 1: Eliminar el prefijo 'data:image/...;base64,'
+    const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+    // Paso 2: Decodificar el contenido base64 en un Buffer
+    const imageBuffer = Buffer.from(base64Data, "base64");
+    // Paso 3: Convertir el Buffer a un ReadableStream
+    const readableStream = new stream_1.Readable();
+    readableStream.push(imageBuffer);
+    readableStream.push(null); // Señalar el final del flujo
+    return readableStream;
+}
+function uploadReadableStreamToPinata(imageStream) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const options = {
+                pinataMetadata: {
+                    name: "tokenlogo.png",
+                },
+            };
+            const result = yield pinata.pinFileToIPFS(imageStream, options);
+            console.log("Image successfully uploaded. IPFS Hash:", result.IpfsHash);
+            return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+        }
+        catch (error) {
+            console.error("Error uploading image to Pinata:", error);
+            throw error;
+        }
+    });
+}
+/**
+ * Uploads a JSON file to Pinata and returns the IPFS URL.
+ * @param filePath - Path to the JSON file
+ * @returns Public URL to access the JSON file on IPFS
+ */
+function uploadJsonToPinata(metadataJson) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // const readableStream = fs.createReadStream(filePath);
+            const options = {
+                pinataMetadata: {
+                    name: "metadata.json",
+                },
+            };
+            const result = yield pinata.pinFileToIPFS(metadataJson, options);
+            console.log("JSON successfully uploaded. IPFS Hash:", result.IpfsHash);
+            return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+        }
+        catch (error) {
+            console.error("Error uploading JSON to Pinata:", error);
+            throw error;
+        }
+    });
+}
+function stringToReadableStream(text) {
+    return new stream_1.Readable({
+        read() {
+            this.push(text);
+            this.push(null); // Señala el final del stream
+        },
+    });
+}
+/**
+ * Creates a metadata JSON file with details for the token and stores it locally.
+ * @param imageURI - URI of the token image on IPFS
+ * @param _name - Name of the token
+ * @param _symbol - Symbol of the token
+ * @param _description - Description of the token
+ * @returns The file path of the created JSON metadata file
+ */
+function createMetadataJSON(imageURI, _name, _symbol, _description) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const metadata = {
+            name: _name,
+            symbol: _symbol,
+            description: _description,
+            image: imageURI,
+            showName: true,
+            createdOn: "",
+            website: "",
+        };
+        const metadataJson = JSON.stringify(metadata);
+        // // Save the metadata JSON locally
+        // const jsonFilePath = path.resolve("metadata.json");
+        // fs.writeFileSync(jsonFilePath, metadataJson);
+        // return jsonFilePath;
+        return metadataJson;
     });
 }
 server.listen(port, () => {

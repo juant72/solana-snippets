@@ -19,6 +19,11 @@ import {
 } from "@solana/web3.js";
 import { Server } from "socket.io";
 import http from "http";
+import fs from "fs";
+import path from "path";
+import { Readable } from "stream";
+
+//////////// END IMPORTS ////////////////
 
 let tokenMintAccount: Keypair;
 
@@ -49,7 +54,7 @@ io.on("connection", (socket) => {
         name,
         symbol,
         description,
-        imageURI,
+        imageData,
         decimals,
         supply,
         publicKey,
@@ -62,7 +67,7 @@ io.on("connection", (socket) => {
         !name ||
         !symbol ||
         !description ||
-        !imageURI ||
+        !imageData ||
         !decimals ||
         !supply ||
         !publicKey ||
@@ -79,7 +84,7 @@ io.on("connection", (socket) => {
           name,
           symbol,
           description,
-          imageURI,
+          imageData,
           decimals,
           supply,
           publicKey,
@@ -134,7 +139,7 @@ async function prepareTokenTransaction(
   name: string,
   symbol: string,
   description: string,
-  imageURI: string,
+  imageData: string,
   decimals: number,
   supply: BigInt,
   payerPublicKey: string,
@@ -148,6 +153,40 @@ async function prepareTokenTransaction(
     const lamports = await connection.getMinimumBalanceForRentExemption(
       MINT_SIZE
     );
+
+    // Preparing Metadata Stuff
+    // Derive the Program Derived Address (PDA) for token metadata
+    const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
+      "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+    );
+
+    const [metadataPDA] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("metadata"),
+        TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+        tokenMintAccount.publicKey.toBuffer(),
+      ],
+      TOKEN_METADATA_PROGRAM_ID
+    );
+
+    // Manipuling image token
+    // Upload image and metadata JSON to Pinata
+
+    const imageStream = base64ToReadableStream(imageData);
+    // const imageURI = await uploadToPinata(path.resolve("tokenlogo.png"));
+    const imageIpfsURI = await uploadReadableStreamToPinata(imageStream);
+
+    const metadataJsonString = await createMetadataJSON(
+      imageIpfsURI,
+      name,
+      symbol,
+      description
+    );
+
+    const metadataIpfsURI = await uploadJsonToPinata(
+      stringToReadableStream(metadataJsonString)
+    );
+    console.log("Metadata IPFS JSon URI:", metadataIpfsURI);
 
     // Obtener el recentBlockhash y el lastValidBlockHeight
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash();
@@ -194,7 +233,7 @@ async function prepareTokenTransaction(
       transaction.compileMessage()
     );
 
-    console.log("TRX to send: ", transaction);
+    // console.log("TRX to send: ", transaction);
     transaction.compileMessage();
     const serializedTransaction = transaction.serialize({
       requireAllSignatures: false,
@@ -243,17 +282,17 @@ async function executeTransaction(signedTransactionData: string) {
       tokenMintAccount.publicKey.toBase58()
     );
 
-    console.log("******************************");
-    console.log("Antes de la firma=\n", signedTransaction);
-    console.log("******++*****************");
+    // console.log("******************************");
+    // console.log("Antes de la firma=\n", signedTransaction);
+    // console.log("******++*****************");
 
     signedTransaction.partialSign(tokenMintAccount);
-    console.log("=======================");
-    console.log(
-      "After Mint Account SIGNING TRX =============",
-      signedTransaction
-    );
-    console.log("=======================");
+    // console.log("=======================");
+    // console.log(
+    //   "After Mint Account SIGNING TRX =============",
+    //   signedTransaction
+    // );
+    // console.log("=======================");
 
     // Validar que la transacción tenga firmas válidas antes de enviarla
     if (!signedTransaction.verifySignatures()) {
@@ -293,6 +332,128 @@ async function executeTransaction(signedTransactionData: string) {
     console.error("Error al ejecutar la transacción:", error);
     throw error;
   }
+}
+
+async function uploadToPinata(filePath: string): Promise<string> {
+  try {
+    const readableStream = fs.createReadStream(filePath);
+
+    const options = {
+      pinataMetadata: {
+        name: "tokenlogo.png",
+      },
+    };
+
+    const result = await pinata.pinFileToIPFS(readableStream, options);
+    console.log("Image successfully uploaded. IPFS Hash:", result.IpfsHash);
+
+    return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+  } catch (error) {
+    console.error("Error uploading image to Pinata:", error);
+    throw error;
+  }
+}
+
+function base64ToReadableStream(base64Image: string) {
+  // Paso 1: Eliminar el prefijo 'data:image/...;base64,'
+  const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+
+  // Paso 2: Decodificar el contenido base64 en un Buffer
+  const imageBuffer = Buffer.from(base64Data, "base64");
+
+  // Paso 3: Convertir el Buffer a un ReadableStream
+  const readableStream = new Readable();
+  readableStream.push(imageBuffer);
+  readableStream.push(null); // Señalar el final del flujo
+
+  return readableStream;
+}
+
+async function uploadReadableStreamToPinata(
+  imageStream: Readable
+): Promise<string> {
+  try {
+    const options = {
+      pinataMetadata: {
+        name: "tokenlogo.png",
+      },
+    };
+
+    const result = await pinata.pinFileToIPFS(imageStream, options);
+    console.log("Image successfully uploaded. IPFS Hash:", result.IpfsHash);
+
+    return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+  } catch (error) {
+    console.error("Error uploading image to Pinata:", error);
+    throw error;
+  }
+}
+
+/**
+ * Uploads a JSON file to Pinata and returns the IPFS URL.
+ * @param filePath - Path to the JSON file
+ * @returns Public URL to access the JSON file on IPFS
+ */
+async function uploadJsonToPinata(metadataJson: Readable): Promise<string> {
+  try {
+    // const readableStream = fs.createReadStream(filePath);
+
+    const options = {
+      pinataMetadata: {
+        name: "metadata.json",
+      },
+    };
+
+    const result = await pinata.pinFileToIPFS(metadataJson, options);
+    console.log("JSON successfully uploaded. IPFS Hash:", result.IpfsHash);
+
+    return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+  } catch (error) {
+    console.error("Error uploading JSON to Pinata:", error);
+    throw error;
+  }
+}
+
+function stringToReadableStream(text: string): Readable {
+  return new Readable({
+    read() {
+      this.push(text);
+      this.push(null); // Señala el final del stream
+    },
+  });
+}
+/**
+ * Creates a metadata JSON file with details for the token and stores it locally.
+ * @param imageURI - URI of the token image on IPFS
+ * @param _name - Name of the token
+ * @param _symbol - Symbol of the token
+ * @param _description - Description of the token
+ * @returns The file path of the created JSON metadata file
+ */
+async function createMetadataJSON(
+  imageURI: string,
+  _name: string,
+  _symbol: string,
+  _description: string
+): Promise<string> {
+  const metadata = {
+    name: _name,
+    symbol: _symbol,
+    description: _description,
+    image: imageURI,
+    showName: true,
+    createdOn: "",
+    website: "",
+  };
+
+  const metadataJson = JSON.stringify(metadata);
+
+  // // Save the metadata JSON locally
+  // const jsonFilePath = path.resolve("metadata.json");
+  // fs.writeFileSync(jsonFilePath, metadataJson);
+
+  // return jsonFilePath;
+  return metadataJson;
 }
 
 server.listen(port, () => {

@@ -59,22 +59,22 @@ function handleMenuSelection() {
                 const revokeMint = readline_sync_1.default.keyInYNStrict("Revoke Mint Authority? (Yes/No): ");
                 // Procesar carga de imagen en base64
                 const tokenImagePath = readline_sync_1.default.question(`Image token path: (${defaulImagePath}:) `, { defaultInput: defaulImagePath });
-                let tokenImageURI;
+                let tokenImageData;
                 try {
                     const imageBuffer = fs_1.default.readFileSync(tokenImagePath);
-                    tokenImageURI = `data:image/${tokenImagePath
+                    tokenImageData = `data:image/${tokenImagePath
                         .split(".")
                         .pop()};base64,${imageBuffer.toString("base64")}`;
                 }
                 catch (err) {
                     console.error("Error reading image:", err);
-                    tokenImageURI = "";
+                    tokenImageData = "";
                 }
                 const tokenData = {
                     name: tokenName,
                     symbol: tokenSymbol,
                     description: tokenDescription,
-                    imageURI: tokenImageURI,
+                    imageData: tokenImageData,
                     decimals: tokenDecimals,
                     supply: tokenSupply,
                     publicKey: keypair.publicKey.toString(),
