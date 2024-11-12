@@ -47,20 +47,21 @@ const stream_1 = require("stream");
 const mpl_token_metadata_1 = require("@metaplex-foundation/mpl-token-metadata");
 //////////// END IMPORTS ////////////////
 let tokenMintAccount;
-const port = process.env.PORT || 3000;
+// Socket PORT
+const port = process.env.WSS_PORT || 3000;
 const pinata = new sdk_1.default({ pinataJWTKey: process.env.PINATA_JWT });
 // Crear un servidor HTTP para usar con Socket.IO
 const server = http_1.default.createServer();
 const io = new socket_io_1.Server(server, {
     cors: {
-        origin: "*", // Permitir todas las conexiones
+        origin: `"${process.env.WSS_CORS}"`, // Permitir todas las conexiones
     },
 });
 io.on("connection", (socket) => {
-    console.log("Cliente conectado:", socket.id);
-    socket.emit("server_message", "Bienvenido al servidor WebSocket de Solana!");
+    console.log("Client Connected...", socket.id);
+    socket.emit("server_message", "Welcome to Solana WebSocket Server!");
     socket.on("disconnect", () => {
-        console.log("Cliente desconectado:", socket.id);
+        console.log("Client Disconected...", socket.id);
     });
     // Paso 1: Cliente solicita la creación del token
     socket.on("create_token", (data) => __awaiter(void 0, void 0, void 0, function* () {
@@ -73,12 +74,17 @@ io.on("connection", (socket) => {
                 !imageData ||
                 !decimals ||
                 !supply ||
-                !publicKey ||
-                !revokeFreeze ||
-                !revokeMint) {
-                throw new Error("Faltan parámetros necesarios.");
+                !publicKey) {
+                console.log("name", name);
+                console.log("symbol", symbol);
+                console.log("description", description);
+                console.log("publicKey", publicKey);
+                console.log("decimals", decimals);
+                console.log("revokeMint", revokeMint);
+                console.log("revokeFreeze", revokeFreeze);
+                throw new Error("Missing parameters");
             }
-            console.log("Calculamos los costos y generamos la transacción");
+            console.log("Calculating cost and creating transaction...");
             // Calculamos los costos y generamos la transacción
             const { transactionDetails, estimatedGas } = yield prepareTokenTransaction(name, symbol, description, imageData, decimals, supply, publicKey, revokeFreeze, revokeMint);
             // Paso 3: Enviar detalles de la transacción al cliente
@@ -88,14 +94,14 @@ io.on("connection", (socket) => {
             });
         }
         catch (error) {
-            console.error("Error al procesar la solicitud:", error);
-            socket.emit("error", { message: "Error al procesar la solicitud." });
+            console.error("Error processing request", error);
+            socket.emit("error", { message: "Error procesing request" });
         }
     }));
     // Paso 4: Cliente firma la transacción
     socket.on("signed_transaction", (signedTransaction) => __awaiter(void 0, void 0, void 0, function* () {
         try {
-            console.log("Iniciando proceso de envio de TRX a Blockchain");
+            console.log("Starting sending transaction process...");
             const { signedTransactionData } = signedTransaction;
             // Validar y ejecutar la transacción en la blockchain
             const result = yield executeTransaction(signedTransactionData);
@@ -103,8 +109,8 @@ io.on("connection", (socket) => {
             socket.emit("transaction_result", result);
         }
         catch (error) {
-            console.error("Error al ejecutar la transacción:", error);
-            socket.emit("error", { message: "Error al ejecutar la transacción." });
+            console.error("Error executing transaction", error);
+            socket.emit("error", { message: "Error executing transaction" });
         }
     }));
 });
@@ -114,7 +120,7 @@ function getRecentBlockhash() {
         const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"));
         const { blockhash, lastValidBlockHeight } = yield connection.getLatestBlockhash("finalized");
         if (!blockhash) {
-            throw new Error("No se pudo obtener el recentBlockhash.");
+            throw new Error("Cannot get the recentBlockhash.");
         }
         return { blockhash, lastValidBlockHeight };
     });
@@ -129,7 +135,7 @@ function prepareTokenTransaction(name, symbol, description, imageData, decimals,
             const lamports = yield connection.getMinimumBalanceForRentExemption(spl_token_1.MINT_SIZE);
             // Preparing Metadata Stuff
             // Derive the Program Derived Address (PDA) for token metadata
-            const TOKEN_METADATA_PROGRAM_ID = new web3_js_1.PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+            const TOKEN_METADATA_PROGRAM_ID = new web3_js_1.PublicKey(`${process.env.TOKEN_METADATA_PROGRAM_ID}`);
             const [metadataPDA] = web3_js_1.PublicKey.findProgramAddressSync([
                 Buffer.from("metadata"),
                 TOKEN_METADATA_PROGRAM_ID.toBuffer(),
@@ -137,6 +143,7 @@ function prepareTokenTransaction(name, symbol, description, imageData, decimals,
             ], TOKEN_METADATA_PROGRAM_ID);
             // Manipuling image token
             // Upload image and metadata JSON to Pinata
+            console.log("Pre-process metadata");
             const imageStream = base64ToReadableStream(imageData);
             // const imageURI = await uploadToPinata(path.resolve("tokenlogo.png"));
             const imageIpfsURI = yield uploadReadableStreamToPinata(imageStream);
@@ -155,10 +162,12 @@ function prepareTokenTransaction(name, symbol, description, imageData, decimals,
                 space: spl_token_1.MINT_SIZE,
                 programId: spl_token_1.TOKEN_PROGRAM_ID,
             });
-            const initMintInstruction = (0, spl_token_1.createInitializeMint2Instruction)(tokenMintAccount.publicKey, decimals, payerPublicKeyObject, // Usar la clave pública del cliente como mint authority
-            payerPublicKeyObject // Usar la clave pública del cliente como freeze authority
+            const freezeAuthority = revokeFreeze ? null : payerPublicKeyObject;
+            const initMintInstruction = (0, spl_token_1.createInitializeMint2Instruction)(tokenMintAccount.publicKey, //Token Mint Account
+            decimals, //Number of decimals in token account amounts
+            payerPublicKeyObject, // Mint authority
+            freezeAuthority // Freeze authority
             );
-            // el mint Authority al principio debe permitir mintear los tokens
             // Step 2: Create Associated Token Account (ATA)
             console.log("Creating Asociated Token Account instruction....");
             const ata = yield (0, spl_token_1.getAssociatedTokenAddress)(tokenMintAccount.publicKey, payerPublicKeyObject, false, spl_token_1.TOKEN_PROGRAM_ID, spl_token_1.ASSOCIATED_TOKEN_PROGRAM_ID);
@@ -189,21 +198,29 @@ function prepareTokenTransaction(name, symbol, description, imageData, decimals,
             });
             // Step 4: Mint tokens
             console.log("Minting tokens instruction....");
-            const amountToMint = 1000000000 * Math.pow(10, 2); // Convert to minor units
+            const amountToMint = Number(supply) * Math.pow(10, 2); // Convert to minor units
             const mintToInstruction = (0, spl_token_1.createMintToInstruction)(tokenMintAccount.publicKey, ata, payerPublicKeyObject, amountToMint, [], spl_token_1.TOKEN_PROGRAM_ID);
-            // Step 5: Transfer commission (0.12 SOL)
+            // Step 5: Transfer commission
             console.log("Creating Transfer Comission instruction....");
             const fees_account = process.env.FEES_ACCOUNT;
             console.log("Fees Account:", fees_account);
             const commissionAccount = new web3_js_1.PublicKey(fees_account);
-            const commissionLamports = 0.12 * 1000000000;
+            const fees_commission = Number(process.env.AKTYVO_FEES);
+            const commissionLamports = fees_commission * 1000000000;
             const commissionInstruction = web3_js_1.SystemProgram.transfer({
                 fromPubkey: payerPublicKeyObject,
                 toPubkey: commissionAccount,
                 lamports: commissionLamports,
             });
+            // Step 6: revoke mint authority
+            // Si revokeMint es true, revocar el Mint Authority
             // Armo la transaccion
             const transaction = new web3_js_1.Transaction().add(createTokenAccountInstruction, initMintInstruction, createATAInstruction, metadataInstruction, mintToInstruction, commissionInstruction);
+            if (revokeMint) {
+                console.log("Creating revoke mint authority instruction");
+                let revokeMintAuthorityInstruction = (0, spl_token_1.createSetAuthorityInstruction)(tokenMintAccount.publicKey, payerPublicKeyObject, spl_token_1.AuthorityType.MintTokens, null);
+                transaction.add(revokeMintAuthorityInstruction);
+            }
             // Asignar el recentBlockhash a la transacción
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
@@ -229,7 +246,7 @@ function prepareTokenTransaction(name, symbol, description, imageData, decimals,
             };
         }
         catch (error) {
-            console.error("Error en la preparación de la transacción:", error);
+            console.error("Error preparing transaction:", error);
             throw error;
         }
     });
@@ -241,54 +258,42 @@ function executeTransaction(signedTransactionData) {
             // Decodificar y crear la transacción desde el dato firmado recibido
             let signedTransaction = web3_js_1.Transaction.from(Buffer.from(signedTransactionData, "base64"));
             // Obtener el recentBlockhash más actualizado
-            const { blockhash: recentBlockhash } = yield connection.getLatestBlockhash();
-            const latestBlockHash = yield connection.getLatestBlockhash();
             const { blockhash, lastValidBlockHeight } = yield getRecentBlockhash();
             // Asignar el recentBlockhash a la transacción si no coincide
             if (signedTransaction.recentBlockhash !== blockhash) {
-                console.log("Actualizando el recentBlockhash en la transacción.");
+                console.log("Updating recentBlockhash in transaction.");
                 console.log("latest - blockhash: ", blockhash);
                 // signedTransaction.recentBlockhash = blockhash;
             }
             //COnsol
             console.log("Signing TRX with  MintAccount  ###", tokenMintAccount.publicKey.toBase58());
-            // console.log("******************************");
-            // console.log("Antes de la firma=\n", signedTransaction);
-            // console.log("******++*****************");
             signedTransaction.partialSign(tokenMintAccount);
-            // console.log("=======================");
-            // console.log(
-            //   "After Mint Account SIGNING TRX =============",
-            //   signedTransaction
-            // );
-            // console.log("=======================");
             // Validar que la transacción tenga firmas válidas antes de enviarla
             if (!signedTransaction.verifySignatures()) {
-                throw new Error("Signature verification failed: las firmas no son válidas o están incompletas.");
+                throw new Error("Signature verification failed: singatures are not valid or are missing.");
             }
             // Enviar la transacción ya firmada
             const txid = yield connection.sendRawTransaction(signedTransaction.serialize());
             // Confirmación opcional si quieres asegurarte de que esté incluida en un bloque
-            // await connection.confirmTransaction(txid, "confirmed");
             yield connection.confirmTransaction({
                 blockhash: blockhash,
                 lastValidBlockHeight: lastValidBlockHeight,
                 signature: txid,
             });
-            console.log("Transacción exitosa, txid:", txid);
+            console.log("Transaction sucessfull, txid:", txid);
             return { success: true, transactionId: txid };
         }
         catch (error) {
             if (error instanceof Error &&
                 error.message.includes("blockhash not found")) {
                 // Si el blockhash es inválido, pedimos al cliente que firme nuevamente
-                console.error("Blockhash vencido. Solicita una firma nueva al cliente.");
+                console.error("Blockhash expired. Reques a new signature to client.");
                 return {
                     success: false,
-                    error: "Blockhash vencido. Solicita una firma nueva.",
+                    error: "Blockhash expired. Request a new signature to client.",
                 };
             }
-            console.error("Error al ejecutar la transacción:", error);
+            console.error("Error executing transaction", error);
             throw error;
         }
     });
@@ -304,7 +309,7 @@ function uploadToPinata(filePath) {
             };
             const result = yield pinata.pinFileToIPFS(readableStream, options);
             console.log("Image successfully uploaded. IPFS Hash:", result.IpfsHash);
-            return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+            return `${process.env.PINATA_GATEWAY}${result.IpfsHash}`;
         }
         catch (error) {
             console.error("Error uploading image to Pinata:", error);
@@ -333,7 +338,7 @@ function uploadReadableStreamToPinata(imageStream) {
             };
             const result = yield pinata.pinFileToIPFS(imageStream, options);
             console.log("Image successfully uploaded. IPFS Hash:", result.IpfsHash);
-            return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+            return `${process.env.PINATA_GATEWAY}${result.IpfsHash}`;
         }
         catch (error) {
             console.error("Error uploading image to Pinata:", error);
@@ -357,7 +362,7 @@ function uploadJsonToPinata(metadataJson) {
             };
             const result = yield pinata.pinFileToIPFS(metadataJson, options);
             console.log("JSON successfully uploaded. IPFS Hash:", result.IpfsHash);
-            return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+            return `${process.env.PINATA_GATEWAY}${result.IpfsHash}`;
         }
         catch (error) {
             console.error("Error uploading JSON to Pinata:", error);

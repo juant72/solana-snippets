@@ -51,6 +51,8 @@ async function handleMenuSelection() {
       const defaultTokenDecimals = "6";
       const defaultTokenSupply = "1000000";
       const defaulImagePath = "tokenlogo.png";
+      const defaultRevokeFreeze = false;
+      const defaultRevokeMint = false;
 
       // Preguntar por detalles del token
       const tokenName = readlineSync.question(
@@ -75,11 +77,15 @@ async function handleMenuSelection() {
       );
 
       const revokeFreeze = readlineSync.keyInYNStrict(
-        "Revoke Freeze Authority? (Yes/No): "
+        `"Revoke Freeze Authority? (Yes/No) (default: ${defaultRevokeFreeze}): "`
       );
+
+      console.log("revokefreeze: ", revokeFreeze);
+
       const revokeMint = readlineSync.keyInYNStrict(
         "Revoke Mint Authority? (Yes/No): "
       );
+      console.log("revokeMint: ", revokeMint);
 
       // Procesar carga de imagen en base64
       const tokenImagePath = readlineSync.question(
@@ -140,6 +146,7 @@ async function handleMenuSelection() {
 
 socket.on("transaction_details", async (data) => {
   console.log("Transaction details received.");
+  console.log("Estimated Gas: ", data.estimatedGas);
 
   const acceptTransaction = readlineSync.keyInYNStrict(
     "¿Do you want to approve this transaction and execute?"

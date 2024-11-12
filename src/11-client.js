@@ -49,14 +49,18 @@ function handleMenuSelection() {
                 const defaultTokenDecimals = "6";
                 const defaultTokenSupply = "1000000";
                 const defaulImagePath = "tokenlogo.png";
+                const defaultRevokeFreeze = false;
+                const defaultRevokeMint = false;
                 // Preguntar por detalles del token
                 const tokenName = readline_sync_1.default.question(`Token Name: (default: ${defaultTokenName}): `, { defaultInput: defaultTokenName });
                 const tokenSymbol = readline_sync_1.default.question(`Token Symbol: (default: ${defaultTokenSymbol}): `, { defaultInput: defaultTokenSymbol });
                 const tokenDescription = readline_sync_1.default.question(`Token Description: (default: ${defaultTokenDescription}): `, { defaultInput: defaultTokenDescription });
                 const tokenDecimals = readline_sync_1.default.question(`Decimals (default: ${defaultTokenDecimals}): `, { defaultInput: defaultTokenDecimals });
                 const tokenSupply = readline_sync_1.default.question(`Token Supply: (default: ${defaultTokenSupply}): `, { defaultInput: defaultTokenSupply });
-                const revokeFreeze = readline_sync_1.default.keyInYNStrict("Revoke Freeze Authority? (Yes/No): ");
+                const revokeFreeze = readline_sync_1.default.keyInYNStrict(`"Revoke Freeze Authority? (Yes/No) (default: ${defaultRevokeFreeze}): "`);
+                console.log("revokefreeze: ", revokeFreeze);
                 const revokeMint = readline_sync_1.default.keyInYNStrict("Revoke Mint Authority? (Yes/No): ");
+                console.log("revokeMint: ", revokeMint);
                 // Procesar carga de imagen en base64
                 const tokenImagePath = readline_sync_1.default.question(`Image token path: (${defaulImagePath}:) `, { defaultInput: defaulImagePath });
                 let tokenImageData;
@@ -106,6 +110,7 @@ function handleMenuSelection() {
 }
 socket.on("transaction_details", (data) => __awaiter(void 0, void 0, void 0, function* () {
     console.log("Transaction details received.");
+    console.log("Estimated Gas: ", data.estimatedGas);
     const acceptTransaction = readline_sync_1.default.keyInYNStrict("¿Do you want to approve this transaction and execute?");
     if (acceptTransaction) {
         console.log("Signing transaction...");
