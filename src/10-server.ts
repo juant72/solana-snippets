@@ -28,6 +28,7 @@ import http, { IncomingMessage } from "http";
 import fs from "fs";
 import { Readable } from "stream";
 import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/mpl-token-metadata";
+import https from "https";
 
 //////////// END IMPORTS ////////////////
 
@@ -39,8 +40,14 @@ const port = process.env.WSS_PORT || 3000;
 //PINATA setting
 const pinata = new PinataSDK({ pinataJWTKey: process.env.PINATA_JWT! });
 
+// Cargar los certificados SSL
+const sslOptions = {
+  key: fs.readFileSync(process.env.SSL_KEY!),
+  cert: fs.readFileSync(process.env.SSL_CERT!),
+};
+
 // Crear un servidor HTTP para usar con Socket.IO
-const server = http.createServer();
+const server = https.createServer(sslOptions);
 const io = new Server(server, {
   cors: {
     origin: `"${process.env.WSS_CORS}"`, // Permitir todas las conexiones

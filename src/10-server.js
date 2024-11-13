@@ -42,18 +42,23 @@ const sdk_1 = __importDefault(require("@pinata/sdk"));
 const spl_token_1 = require("@solana/spl-token");
 const web3_js_1 = require("@solana/web3.js");
 const socket_io_1 = require("socket.io");
-const http_1 = __importDefault(require("http"));
 const fs_1 = __importDefault(require("fs"));
 const stream_1 = require("stream");
 const mpl_token_metadata_1 = require("@metaplex-foundation/mpl-token-metadata");
+const https_1 = __importDefault(require("https"));
 //////////// END IMPORTS ////////////////
 let tokenMintAccount;
 // Socket PORT
 const port = process.env.WSS_PORT || 3000;
 //PINATA setting
 const pinata = new sdk_1.default({ pinataJWTKey: process.env.PINATA_JWT });
+// Cargar los certificados SSL
+const sslOptions = {
+    key: fs_1.default.readFileSync(process.env.SSL_KEY),
+    cert: fs_1.default.readFileSync(process.env.SSL_CERT),
+};
 // Crear un servidor HTTP para usar con Socket.IO
-const server = http_1.default.createServer();
+const server = https_1.default.createServer(sslOptions);
 const io = new socket_io_1.Server(server, {
     cors: {
         origin: `"${process.env.WSS_CORS}"`, // Permitir todas las conexiones

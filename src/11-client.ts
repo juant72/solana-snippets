@@ -1,6 +1,8 @@
+const fetch = require("node-fetch");
 import { io, Socket } from "socket.io-client";
 import { faker } from "@faker-js/faker";
 import readlineSync from "readline-sync";
+import https from "https";
 import {
   Transaction,
   Keypair,
@@ -9,6 +11,10 @@ import {
   clusterApiUrl,
 } from "@solana/web3.js";
 import fs from "fs";
+
+interface AuthResponse {
+  token: string;
+}
 
 let socket: Socket;
 
@@ -36,13 +42,24 @@ let authToken: string | null = null;
  */
 async function authenticate() {
   try {
+    const agent = new https.Agent({
+      rejectUnauthorized: false, // Ignorar certificados no verificados
+    });
     // Example fetch request to authenticate the user
-    const response = await fetch("http://localhost:3000/authenticate", {
+    const response = await fetch("https://localhost:3000/authenticate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: "user", password: "pass" }),
+      agent,
     });
-    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(`Authentication failed: ${response.statusText}`);
+    }
+
+    // const data = await response.json();
+    // Asegúrate de que el tipo de datos sea AuthResponse
+    const data = (await response.json()) as AuthResponse;
     authToken = data.token; // Store the JWT token
 
     console.log("Authenticated. Token received.");
@@ -60,10 +77,21 @@ async function connectSocket() {
     return;
   }
 
+  const agent = new https.Agent({
+    rejectUnauthorized: false, // Ignorar certificados no verificados
+  });
+
   // Connect to the server only after obtaining the token
-  socket = io("http://localhost:3000", {
+  socket = io("wss://localhost:3000", {
     auth: {
       token: authToken, // Send the token as part of the connection
+    },
+    transports: ["websocket"],
+    rejectUnauthorized: false,
+    transportOptions: {
+      websocket: {
+        agent, // Usar el agente aquí
+      },
     },
   });
 

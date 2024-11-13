@@ -29,6 +29,7 @@
     "form-data": "^4.0.1",
     "fs": "0.0.2",
     "jsonwebtoken": "^9.0.2",
+    "node-fetch": "2",
     "readline-sync": "^1.4.10",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
