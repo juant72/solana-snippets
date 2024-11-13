@@ -37,6 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv = __importStar(require("dotenv"));
 dotenv.config();
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const sdk_1 = __importDefault(require("@pinata/sdk"));
 const spl_token_1 = require("@solana/spl-token");
 const web3_js_1 = require("@solana/web3.js");
@@ -49,6 +50,7 @@ const mpl_token_metadata_1 = require("@metaplex-foundation/mpl-token-metadata");
 let tokenMintAccount;
 // Socket PORT
 const port = process.env.WSS_PORT || 3000;
+//PINATA setting
 const pinata = new sdk_1.default({ pinataJWTKey: process.env.PINATA_JWT });
 // Crear un servidor HTTP para usar con Socket.IO
 const server = http_1.default.createServer();
@@ -56,6 +58,54 @@ const io = new socket_io_1.Server(server, {
     cors: {
         origin: `"${process.env.WSS_CORS}"`, // Permitir todas las conexiones
     },
+});
+// Ruta para autenticar y generar JWT
+server.on("request", (req, res) => {
+    if (req.method === "POST" && req.url === "/authenticate") {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+            const { username, password } = JSON.parse(body);
+            console.log("User/pass ", username, password);
+            console.log("User/pass ", process.env.VALID_USER, process.env.VALID_PASSWORD);
+            if (username === process.env.VALID_USER &&
+                password === process.env.VALID_PASSWORD) {
+                console.log("U/pass valid");
+                const token = jsonwebtoken_1.default.sign({ username }, process.env.JWT_SECRET, {
+                    expiresIn: "1h",
+                });
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ token }));
+            }
+            else {
+                res.writeHead(401);
+                res.end("Invalid credentials");
+            }
+        });
+    }
+});
+// Función para validar JWT
+function validateJWT(token) {
+    try {
+        return jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
+    }
+    catch (error) {
+        console.error("JWT verification failed:", error);
+        return null;
+    }
+}
+io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+        return next(new Error("Authentication error: Token is missing"));
+    }
+    const decoded = validateJWT(token);
+    if (!decoded) {
+        return next(new Error("Authentication error: Invalid token"));
+    }
+    // Agregar el usuario al objeto `socket` para acceder a la información del usuario en otros eventos
+    socket.user = decoded;
+    next();
 });
 io.on("connection", (socket) => {
     console.log("Client Connected...", socket.id);

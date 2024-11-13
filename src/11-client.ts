@@ -1,4 +1,4 @@
-import { io } from "socket.io-client";
+import { io, Socket } from "socket.io-client";
 import { faker } from "@faker-js/faker";
 import readlineSync from "readline-sync";
 import {
@@ -10,7 +10,7 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 
-const socket = io("http://localhost:3000");
+let socket = io("http://localhost:3000");
 
 // Cargar la wallet local desde el archivo JSON
 const walletPath = "~/wallet-client.json";
@@ -32,6 +32,48 @@ try {
 socket.on("server_message", (message) => {
   console.log(message);
 });
+
+let authToken: string | null = null;
+async function authenticate() {
+  // Realiza la autenticación (podría ser una llamada HTTP o similar)
+  try {
+    // Llamada a una función que te devuelve el token (ejemplo con fetch)
+    const response = await fetch("http://localhost:3000/authenticate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "user", password: "pass" }),
+    });
+    const data = await response.json();
+    authToken = data.token; // Almacena el JWT
+
+    console.log("Authenticated. Token received.");
+  } catch (error) {
+    console.error("Error during authentication:", error);
+  }
+}
+
+async function connectSocket() {
+  if (!authToken) {
+    console.error("No auth token found. Please authenticate first.");
+    return;
+  }
+
+  socket = io("http://localhost:3000", {
+    auth: {
+      token: authToken, // Enviar el token como parte de la conexión
+    },
+  });
+
+  socket.on("connect", () => {
+    console.log("Socket connected with JWT token!");
+  });
+
+  socket.on("server_message", (message) => {
+    console.log("Server message:", message);
+  });
+
+  // Otros eventos aquí
+}
 
 function showMenu() {
   console.log("\nChoose an option:");
@@ -226,6 +268,8 @@ async function getRecentBlockhash() {
 }
 
 async function start() {
+  await authenticate();
+  await connectSocket();
   showMenu();
   await handleMenuSelection();
 }

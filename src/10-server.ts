@@ -1,6 +1,6 @@
 import * as dotenv from "dotenv";
 dotenv.config();
-
+import jwt, { JwtPayload } from "jsonwebtoken";
 import PinataSDK from "@pinata/sdk";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -21,7 +21,7 @@ import {
   PublicKey,
   Keypair,
 } from "@solana/web3.js";
-import { Server } from "socket.io";
+import { Server, Socket } from "socket.io";
 import http from "http";
 import fs from "fs";
 import { Readable } from "stream";
@@ -43,6 +43,56 @@ const io = new Server(server, {
   cors: {
     origin: `"${process.env.WSS_CORS}"`, // Permitir todas las conexiones
   },
+});
+
+// Ruta para autenticar y generar JWT
+server.on("request", (req, res) => {
+  if (req.method === "POST" && req.url === "/authenticate") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      const { username, password } = JSON.parse(body);
+      if (
+        username === process.env.VALID_USER! &&
+        password === process.env.VALID_PASSWORD!
+      ) {
+        const token = jwt.sign({ username }, process.env.JWT_SECRET!, {
+          expiresIn: "1h",
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ token }));
+      } else {
+        res.writeHead(401);
+        res.end("Invalid credentials");
+      }
+    });
+  }
+});
+
+// Función para validar JWT
+function validateJWT(token: string): string | JwtPayload | null {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET!);
+  } catch (error) {
+    console.error("JWT verification failed:", error);
+    return null;
+  }
+}
+
+io.use((socket: Socket, next) => {
+  const token = socket.handshake.auth.token;
+  if (!token) {
+    return next(new Error("Authentication error: Token is missing"));
+  }
+
+  const decoded = validateJWT(token);
+  if (!decoded) {
+    return next(new Error("Authentication error: Invalid token"));
+  }
+
+  // Agregar el usuario al objeto `socket` para acceder a la información del usuario en otros eventos
+  (socket as any).user = decoded;
+  next();
 });
 
 io.on("connection", (socket) => {

@@ -17,7 +17,7 @@ const faker_1 = require("@faker-js/faker");
 const readline_sync_1 = __importDefault(require("readline-sync"));
 const web3_js_1 = require("@solana/web3.js");
 const fs_1 = __importDefault(require("fs"));
-const socket = (0, socket_io_client_1.io)("http://localhost:3000");
+let socket = (0, socket_io_client_1.io)("http://localhost:3000");
 // Cargar la wallet local desde el archivo JSON
 const walletPath = "~/wallet-client.json";
 let keypair = new web3_js_1.Keypair();
@@ -32,6 +32,46 @@ catch (err) {
 socket.on("server_message", (message) => {
     console.log(message);
 });
+let authToken = null;
+function authenticate() {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Realiza la autenticación (podría ser una llamada HTTP o similar)
+        try {
+            // Llamada a una función que te devuelve el token (ejemplo con fetch)
+            const response = yield fetch("http://localhost:3000/authenticate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username: "user", password: "pass" }),
+            });
+            const data = yield response.json();
+            authToken = data.token; // Almacena el JWT
+            console.log("Authenticated. Token received.");
+        }
+        catch (error) {
+            console.error("Error during authentication:", error);
+        }
+    });
+}
+function connectSocket() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!authToken) {
+            console.error("No auth token found. Please authenticate first.");
+            return;
+        }
+        socket = (0, socket_io_client_1.io)("http://localhost:3000", {
+            auth: {
+                token: authToken, // Enviar el token como parte de la conexión
+            },
+        });
+        socket.on("connect", () => {
+            console.log("Socket connected with JWT token!");
+        });
+        socket.on("server_message", (message) => {
+            console.log("Server message:", message);
+        });
+        // Otros eventos aquí
+    });
+}
 function showMenu() {
     console.log("\nChoose an option:");
     console.log("1. Create token");
@@ -180,6 +220,8 @@ function getRecentBlockhash() {
 }
 function start() {
     return __awaiter(this, void 0, void 0, function* () {
+        yield authenticate();
+        yield connectSocket();
         showMenu();
         yield handleMenuSelection();
     });
