@@ -1,6 +1,8 @@
+import { connection } from "./../../aktyvo/app/utils/connection";
 import * as dotenv from "dotenv";
 dotenv.config();
 import jwt, { JwtPayload } from "jsonwebtoken";
+import crypto from "crypto";
 import PinataSDK from "@pinata/sdk";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -22,7 +24,7 @@ import {
   Keypair,
 } from "@solana/web3.js";
 import { Server, Socket } from "socket.io";
-import http from "http";
+import http, { IncomingMessage } from "http";
 import fs from "fs";
 import { Readable } from "stream";
 import { createCreateMetadataAccountV3Instruction } from "@metaplex-foundation/mpl-token-metadata";
@@ -45,6 +47,9 @@ const io = new Server(server, {
   },
 });
 
+// Almacén en memoria para rastrear los tokens utilizados
+const usedTokens: Set<string> = new Set();
+
 // Ruta para autenticar y generar JWT
 server.on("request", (req, res) => {
   if (req.method === "POST" && req.url === "/authenticate") {
@@ -56,9 +61,14 @@ server.on("request", (req, res) => {
         username === process.env.VALID_USER! &&
         password === process.env.VALID_PASSWORD!
       ) {
-        const token = jwt.sign({ username }, process.env.JWT_SECRET!, {
-          expiresIn: "1h",
-        });
+        const fingerprint = generateFingerprint(req);
+        const token = jwt.sign(
+          { username, fingerprint },
+          process.env.JWT_SECRET!,
+          {
+            expiresIn: "5m",
+          }
+        );
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ token }));
       } else {
@@ -69,6 +79,13 @@ server.on("request", (req, res) => {
   }
 });
 
+function generateFingerprint(req: IncomingMessage) {
+  const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress; // Ejemplo: IP del cliente
+  const userAgent = req.headers["user-agent"] || ""; // Ejemplo: User-Agent
+  const fingerprint = `${clientIp}:${userAgent}`; // Crear un "fingerprint" simple combinando IP y User-Agent
+
+  return fingerprint;
+}
 // Función para validar JWT
 function validateJWT(token: string): string | JwtPayload | null {
   try {
@@ -89,6 +106,16 @@ io.use((socket: Socket, next) => {
   if (!decoded) {
     return next(new Error("Authentication error: Invalid token"));
   }
+
+  // Verificar si el token ya ha sido utilizado
+  const tokenFingerprint = (decoded as JwtPayload).fingerprint;
+  if (usedTokens.has(tokenFingerprint)) {
+    console.log("Authentication error: Token has already been used");
+    return next(new Error("Authentication error: Token has already been used"));
+  }
+
+  // Marcar el token como utilizado
+  usedTokens.add(tokenFingerprint);
 
   // Agregar el usuario al objeto `socket` para acceder a la información del usuario en otros eventos
   (socket as any).user = decoded;
@@ -156,6 +183,7 @@ io.on("connection", (socket) => {
         );
 
       // Paso 3: Enviar detalles de la transacción al cliente
+      console.log("Sending trx details to client...");
       socket.emit("transaction_details", {
         transaction: transactionDetails,
         estimatedGas,

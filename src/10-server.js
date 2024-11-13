@@ -59,6 +59,8 @@ const io = new socket_io_1.Server(server, {
         origin: `"${process.env.WSS_CORS}"`, // Permitir todas las conexiones
     },
 });
+// Almacén en memoria para rastrear los tokens utilizados
+const usedTokens = new Set();
 // Ruta para autenticar y generar JWT
 server.on("request", (req, res) => {
     if (req.method === "POST" && req.url === "/authenticate") {
@@ -66,13 +68,11 @@ server.on("request", (req, res) => {
         req.on("data", (chunk) => (body += chunk));
         req.on("end", () => {
             const { username, password } = JSON.parse(body);
-            console.log("User/pass ", username, password);
-            console.log("User/pass ", process.env.VALID_USER, process.env.VALID_PASSWORD);
             if (username === process.env.VALID_USER &&
                 password === process.env.VALID_PASSWORD) {
-                console.log("U/pass valid");
-                const token = jsonwebtoken_1.default.sign({ username }, process.env.JWT_SECRET, {
-                    expiresIn: "1h",
+                const fingerprint = generateFingerprint(req);
+                const token = jsonwebtoken_1.default.sign({ username, fingerprint }, process.env.JWT_SECRET, {
+                    expiresIn: "5m",
                 });
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ token }));
@@ -84,6 +84,12 @@ server.on("request", (req, res) => {
         });
     }
 });
+function generateFingerprint(req) {
+    const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress; // Ejemplo: IP del cliente
+    const userAgent = req.headers["user-agent"] || ""; // Ejemplo: User-Agent
+    const fingerprint = `${clientIp}:${userAgent}`; // Crear un "fingerprint" simple combinando IP y User-Agent
+    return fingerprint;
+}
 // Función para validar JWT
 function validateJWT(token) {
     try {
@@ -103,6 +109,14 @@ io.use((socket, next) => {
     if (!decoded) {
         return next(new Error("Authentication error: Invalid token"));
     }
+    // Verificar si el token ya ha sido utilizado
+    const tokenFingerprint = decoded.fingerprint;
+    if (usedTokens.has(tokenFingerprint)) {
+        console.log("Authentication error: Token has already been used");
+        return next(new Error("Authentication error: Token has already been used"));
+    }
+    // Marcar el token como utilizado
+    usedTokens.add(tokenFingerprint);
     // Agregar el usuario al objeto `socket` para acceder a la información del usuario en otros eventos
     socket.user = decoded;
     next();
@@ -138,6 +152,7 @@ io.on("connection", (socket) => {
             // Calculamos los costos y generamos la transacción
             const { transactionDetails, estimatedGas } = yield prepareTokenTransaction(name, symbol, description, imageData, decimals, supply, publicKey, revokeFreeze, revokeMint);
             // Paso 3: Enviar detalles de la transacción al cliente
+            console.log("Sending trx details to client...");
             socket.emit("transaction_details", {
                 transaction: transactionDetails,
                 estimatedGas,
