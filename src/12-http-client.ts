@@ -2,7 +2,7 @@ const fetch = require("node-fetch");
 import { io, Socket } from "socket.io-client";
 import { faker } from "@faker-js/faker";
 import readlineSync from "readline-sync";
-import https from "https";
+import http from "http";
 import {
   Transaction,
   Keypair,
@@ -42,15 +42,15 @@ let authToken: string | null = null;
  */
 async function authenticate() {
   try {
-    const agent = new https.Agent({
-      rejectUnauthorized: false, // Ignorar certificados no verificados
-    });
+    // const agent = new http.Agent({
+    //   rejectUnauthorized: false, // Ignorar certificados no verificados
+    // });
     // Example fetch request to authenticate the user
-    const response = await fetch("https://localhost:3001/authenticate", {
+    const response = await fetch("http://localhost:8081/authenticate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: "user", password: "pass" }),
-      agent,
+      //   agent,
     });
 
     if (!response.ok) {
@@ -77,21 +77,21 @@ async function connectSocket() {
     return;
   }
 
-  const agent = new https.Agent({
-    rejectUnauthorized: false, // Ignorar certificados no verificados
-  });
+  //   const agent = new https.Agent({
+  //     rejectUnauthorized: false, // Ignorar certificados no verificados
+  //   });
 
   // Connect to the server only after obtaining the token
-  socket = io("wss://localhost:3001", {
+  socket = io("ws://localhost:8081", {
     auth: {
       token: authToken, // Send the token as part of the connection
     },
     transports: ["websocket"],
     rejectUnauthorized: false,
     transportOptions: {
-      websocket: {
-        agent, // Usar el agente aquí
-      },
+      //   websocket: {
+      //     agent, // Usar el agente aquí
+      //   },
     },
   });
 

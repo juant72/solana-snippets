@@ -16,7 +16,6 @@ const fetch = require("node-fetch");
 const socket_io_client_1 = require("socket.io-client");
 const faker_1 = require("@faker-js/faker");
 const readline_sync_1 = __importDefault(require("readline-sync"));
-const https_1 = __importDefault(require("https"));
 const web3_js_1 = require("@solana/web3.js");
 const fs_1 = __importDefault(require("fs"));
 let socket;
@@ -38,15 +37,15 @@ let authToken = null;
 function authenticate() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const agent = new https_1.default.Agent({
-                rejectUnauthorized: false, // Ignorar certificados no verificados
-            });
+            // const agent = new http.Agent({
+            //   rejectUnauthorized: false, // Ignorar certificados no verificados
+            // });
             // Example fetch request to authenticate the user
-            const response = yield fetch("https://localhost:3001/authenticate", {
+            const response = yield fetch("http://localhost:8081/authenticate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ username: "user", password: "pass" }),
-                agent,
+                //   agent,
             });
             if (!response.ok) {
                 throw new Error(`Authentication failed: ${response.statusText}`);
@@ -71,20 +70,20 @@ function connectSocket() {
             console.error("No auth token found. Please authenticate first.");
             return;
         }
-        const agent = new https_1.default.Agent({
-            rejectUnauthorized: false, // Ignorar certificados no verificados
-        });
+        //   const agent = new https.Agent({
+        //     rejectUnauthorized: false, // Ignorar certificados no verificados
+        //   });
         // Connect to the server only after obtaining the token
-        socket = (0, socket_io_client_1.io)("wss://localhost:3001", {
+        socket = (0, socket_io_client_1.io)("ws://localhost:8081", {
             auth: {
                 token: authToken, // Send the token as part of the connection
             },
             transports: ["websocket"],
             rejectUnauthorized: false,
             transportOptions: {
-                websocket: {
-                    agent, // Usar el agente aquí
-                },
+            //   websocket: {
+            //     agent, // Usar el agente aquí
+            //   },
             },
         });
         socket.on("connect", () => {
