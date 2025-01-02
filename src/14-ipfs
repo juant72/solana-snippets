@@ -1,0 +1,58 @@
+import { createHelia } from "helia";
+import { MemoryBlockstore } from "blockstore-core";
+import { CID } from "multiformats/cid";
+import { unixfs } from "@helia/unixfs";
+import dotenv from "dotenv";
+
+// Cargar las variables de entorno
+dotenv.config();
+
+export async function uploadBase64ImageToIPFS(
+  imageStream: string
+): Promise<string> {
+  let cid: CID;
+  try {
+    // Inicializar Helia
+    const helia = await createHelia({
+      blockstore: new MemoryBlockstore(), // Uso de un bloque de memoria
+    });
+
+    // Quitar el prefijo Base64 si existe
+    const base64Data = imageStream.replace(/^data:image\/png;base64,/, "");
+
+    // Convertir Base64 a Buffer
+    const buffer = Buffer.from(base64Data, "base64");
+    // Guardar en IPFS usando Helia
+    const fs = unixfs(helia);
+    cid = await fs.addBytes(buffer);
+
+    console.log("CID generado:", cid.toString());
+  } catch (error) {
+    console.error("Error al cargar la imagen en IPFS:", error);
+    throw error;
+  }
+  return `${process.env.FILEBASE_GATEWAY}/${cid.toString()}`;
+}
+
+export async function uploadJsonToIPFS(metadataJson: string): Promise<string> {
+  let cid: CID;
+  try {
+    // Inicializar Helia
+    const helia = await createHelia({
+      blockstore: new MemoryBlockstore(), // Uso de un bloque de memoria
+    });
+
+    // Convertir JSON a Buffer
+    const buffer = Buffer.from(metadataJson, "utf-8");
+    // Guardar en IPFS usando Helia
+    const fs = unixfs(helia);
+    cid = await fs.addBytes(buffer);
+
+    console.log("CID generado para JSON:", cid.toString());
+    console.log("CID generado para JSON:", cid.toString());
+  } catch (error) {
+    console.error("Error al cargar JSON en IPFS:", error);
+    throw error;
+  }
+  return `${process.env.FILEBASE_GATEWAY}/${cid.toString()}`;
+}
