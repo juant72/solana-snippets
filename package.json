@@ -13,8 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@faker-js/faker": "^9.2.0",
-    "@helia/core": "^5.1.1",
-    "@helia/unixfs": "^4.0.1",
+    "@google-cloud/storage": "^7.14.0",
     "@ipld/dag-ucan": "^3.4.0",
     "@metaplex-foundation/mpl-token-metadata": "^2.13.0",
     "@pinata/sdk": "^2.1.0",
@@ -34,12 +33,12 @@
     "fs": "0.0.2",
     "helia": "^5.1.1",
     "jsonwebtoken": "^9.0.2",
+    "multiformats": "^13.3.1",
     "node-fetch": "2",
     "readline-sync": "^1.4.10",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
-    "ts-node": "^10.9.2",
-    "multiformats": "^13.3.1"
+    "ts-node": "^10.9.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.3",
