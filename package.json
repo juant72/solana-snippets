@@ -16,6 +16,7 @@
     "@google-cloud/storage": "^7.14.0",
     "@ipld/dag-ucan": "^3.4.0",
     "@metaplex-foundation/mpl-token-metadata": "^2.13.0",
+    "@napi-rs/canvas": "^0.1.65",
     "@pinata/sdk": "^2.1.0",
     "@project-serum/anchor": "^0.26.0",
     "@solana-developers/helpers": "2",
@@ -26,22 +27,25 @@
     "@web3-storage/w3up-client": "^17.1.1",
     "blockstore-fs": "^2.0.2",
     "bs58": "^6.0.0",
+    "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^16.4.5",
     "esrun": "^3.2.26",
+    "express": "^5.0.1",
     "form-data": "^4.0.1",
     "fs": "0.0.2",
     "helia": "^5.1.1",
     "jsonwebtoken": "^9.0.2",
     "multiformats": "^13.3.1",
-    "node-fetch": "2",
+    "node-fetch": "^3.3.2",
     "readline-sync": "^1.4.10",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "ts-node": "^10.9.2"
   },
   "devDependencies": {
-    "@types/node": "^22.10.3",
+    "@types/express": "^5.0.0",
+    "@types/node": "22.10.5",
     "typescript": "^5.6.3"
   }
 }
