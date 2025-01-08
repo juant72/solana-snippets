@@ -1,4 +1,3 @@
-import { connection } from "./../../aktyvo/app/utils/connection";
 import * as dotenv from "dotenv";
 dotenv.config();
 import jwt, { JwtPayload } from "jsonwebtoken";
