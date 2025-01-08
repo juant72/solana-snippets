@@ -37,7 +37,13 @@ const generateCoinHandler: RequestHandler<{}, any, never, CoinRequest> = async (
     // Clear for transparency
     ctx.clearRect(0, 0, width, height);
 
-    // Enhanced metallic gradient
+    // Background color (less bright bronze)
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.fillStyle = "#CD7F32"; // Bronze background
+    ctx.fill();
+
+    // Enhanced metallic gradient for 3D effect (bright bronze)
     const coinGradient = ctx.createRadialGradient(
       centerX - 50,
       centerY - 50,
@@ -46,11 +52,9 @@ const generateCoinHandler: RequestHandler<{}, any, never, CoinRequest> = async (
       centerY,
       radius
     );
-    coinGradient.addColorStop(0, "#FFF5D4"); // Highlight
-    coinGradient.addColorStop(0.2, "#FFD700"); // Bright gold
-    coinGradient.addColorStop(0.5, "#FDB931"); // Medium gold
-    coinGradient.addColorStop(0.8, "#D4AF37"); // Dark gold
-    coinGradient.addColorStop(1, "#B8860B"); // Darker gold
+    coinGradient.addColorStop(0, "#FFD700"); // Bright gold
+    coinGradient.addColorStop(0.5, "#CD7F32"); // Medium bronze
+    coinGradient.addColorStop(1, "#8B4513"); // Dark bronze
 
     // Main coin body with rim effect
     ctx.beginPath();
@@ -58,37 +62,44 @@ const generateCoinHandler: RequestHandler<{}, any, never, CoinRequest> = async (
     ctx.fillStyle = coinGradient;
     ctx.fill();
 
-    // Add texture pattern
-    for (let i = 0; i < 360; i += 2) {
+    // Add highly visible circular texture pattern
+    for (let i = 0; i < 360; i += 5) {
       const radian = (i * Math.PI) / 180;
-      ctx.beginPath();
-      ctx.moveTo(
-        centerX + (radius - 10) * Math.cos(radian),
-        centerY + (radius - 10) * Math.sin(radian)
-      );
-      ctx.lineTo(
-        centerX + (radius - 30) * Math.cos(radian),
-        centerY + (radius - 30) * Math.sin(radian)
-      );
-      ctx.strokeStyle = "rgba(218, 165, 32, 0.1)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // Add rim details
-    for (let i = 0; i < 72; i++) {
       ctx.beginPath();
       ctx.arc(
         centerX,
         centerY,
-        radius,
-        (i * Math.PI) / 36,
-        ((i + 1) * Math.PI) / 36
+        radius - 20,
+        radian,
+        radian + (Math.PI / 180) * 2
       );
-      ctx.lineWidth = 8;
-      ctx.strokeStyle = i % 2 ? "#B8860B" : "#DAA520";
+      ctx.strokeStyle = "rgba(255, 215, 0, 0.5)"; // Bright gold, more visible
+      ctx.lineWidth = 4; // Thicker lines
       ctx.stroke();
     }
+
+    // Add highly visible linear texture pattern
+    for (let i = 0; i < radius; i += 5) {
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, i, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(205, 127, 50, 0.4)"; // Bronze, more visible
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Add rim details with 3D effect (bright bronze)
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = "#FFD700"; // Bright gold for rim
+    ctx.lineWidth = 10;
+    ctx.stroke();
+
+    // Inner rim for 3D effect
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius - 10, 0, Math.PI * 2);
+    ctx.strokeStyle = "#CD7F32"; // Medium bronze for inner rim
+    ctx.lineWidth = 5;
+    ctx.stroke();
 
     try {
       // Process and draw logo
@@ -115,21 +126,21 @@ const generateCoinHandler: RequestHandler<{}, any, never, CoinRequest> = async (
         logoSize / 2
       );
       logoGradient.addColorStop(0, "rgba(255, 215, 0, 0.7)");
-      logoGradient.addColorStop(0.5, "rgba(218, 165, 32, 0.7)");
-      logoGradient.addColorStop(1, "rgba(184, 134, 11, 0.7)");
+      logoGradient.addColorStop(0.5, "rgba(205, 127, 50, 0.7)");
+      logoGradient.addColorStop(1, "rgba(139, 69, 19, 0.7)");
       tempCtx.fillStyle = logoGradient;
       tempCtx.fillRect(0, 0, logoSize, logoSize);
 
       // Draw processed logo
       ctx.drawImage(tempCanvas, logoX, logoY);
 
-      // Draw circular text
+      // Draw circular token name
       ctx.save();
       ctx.font = "bold 18px Arial";
       const text = tokenName.toUpperCase();
       const textRadius = radius * 0.85;
 
-      // Top arc text
+      // Circular text around the top of the coin
       for (let i = 0; i < text.length; i++) {
         const angle = Math.PI + (i - text.length / 2) * 0.2;
         ctx.save();
@@ -142,7 +153,7 @@ const generateCoinHandler: RequestHandler<{}, any, never, CoinRequest> = async (
         // Text shadow
         ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
         ctx.shadowBlur = 4;
-        ctx.fillStyle = "#FFE87C";
+        ctx.fillStyle = "#FFD700"; // Bright gold text
         ctx.fillText(text[i], 0, 0);
 
         ctx.restore();
@@ -160,7 +171,7 @@ const generateCoinHandler: RequestHandler<{}, any, never, CoinRequest> = async (
         0,
         Math.PI * 2
       );
-      ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.3)"; // More visible shine
       ctx.fill();
 
       // Second highlight
@@ -174,7 +185,7 @@ const generateCoinHandler: RequestHandler<{}, any, never, CoinRequest> = async (
         0,
         Math.PI * 2
       );
-      ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.2)"; // More visible shine
       ctx.fill();
 
       const buffer = canvas.toBuffer("image/png");
